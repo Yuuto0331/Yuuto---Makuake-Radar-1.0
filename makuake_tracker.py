@@ -191,11 +191,10 @@ if "logged_in" not in st.session_state:
     st.session_state.user_id = None
     st.session_state.username = None
 
-# 尝试从 URL 参数恢复登录
-query_params = st.experimental_get_query_params()
-if not st.session_state.logged_in and "user_id" in query_params:
+# 尝试从 URL 参数恢复登录（新 API）
+if not st.session_state.logged_in and "user_id" in st.query_params:
     try:
-        uid = int(query_params["user_id"][0])
+        uid = int(st.query_params["user_id"])
         user = get_user_by_id(uid)
         if user:
             st.session_state.logged_in = True
@@ -243,8 +242,8 @@ with st.sidebar:
                 if st.form_submit_button("登录", use_container_width=True):
                     user_id = authenticate_user(login_user, login_pass)
                     if user_id:
-                        # 将用户ID存入 URL 参数，实现刷新后自动登录
-                        st.experimental_set_query_params(user_id=user_id)
+                        # 将用户ID存入 URL 参数，实现刷新后自动登录（新 API）
+                        st.query_params["user_id"] = str(user_id)
                         st.session_state.logged_in = True
                         st.session_state.user_id = user_id
                         st.session_state.username = login_user
@@ -268,7 +267,7 @@ with st.sidebar:
                         user_id = register_user(reg_user, reg_pass)
                         if user_id:
                             # 注册成功后自动登录，同样设置 URL 参数
-                            st.experimental_set_query_params(user_id=user_id)
+                            st.query_params["user_id"] = str(user_id)
                             st.session_state.logged_in = True
                             st.session_state.user_id = user_id
                             st.session_state.username = reg_user
@@ -384,7 +383,7 @@ with st.sidebar:
     
     # 登出按钮（清除 URL 参数）
     if st.button("🚪 登出", use_container_width=True):
-        st.experimental_set_query_params()  # 清除所有参数
+        st.query_params.clear()  # 清除所有参数
         st.session_state.logged_in = False
         st.session_state.user_id = None
         st.session_state.username = None
