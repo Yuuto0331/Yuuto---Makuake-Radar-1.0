@@ -1,0 +1,27 @@
+name: Wake Streamlit App
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'   # 每4小时运行一次
+  workflow_dispatch:         # 允许手动触发
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run wake script
+        env:
+          STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}  # 如果设置了 secret 就使用
+        run: python wake_app.py
