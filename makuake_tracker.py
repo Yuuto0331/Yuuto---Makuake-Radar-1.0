@@ -287,9 +287,17 @@ with st.sidebar:
     
     st.divider()
     
-    # 项目列表（仅显示当前用户的项目）
+    # 项目列表（手动执行查询，避免 pd.read_sql 参数问题）
     st.subheader("项目列表")
-    projects_df = pd.read_sql("SELECT * FROM projects WHERE user_id = ?", conn, params=(st.session_state.user_id,))
+    try:
+        cursor = conn.execute("SELECT * FROM projects WHERE user_id = ?", (st.session_state.user_id,))
+        data = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+        projects_df = pd.DataFrame(data, columns=columns)
+    except Exception as e:
+        st.error(f"查询项目失败: {e}")
+        st.stop()
+    
     if not projects_df.empty:
         selected_title = st.selectbox("选择要查看的项目", projects_df['title'])
         selected_project = projects_df[projects_df['title'] == selected_title].iloc[0]
@@ -303,6 +311,8 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("暂无监控项目")
+        # 后续代码依赖 selected_project，需要提前退出或赋空值
+        selected_project = None
     
     st.divider()
     
@@ -341,17 +351,24 @@ with st.sidebar:
         st.rerun()
 
 # ================= 主界面（仅登录用户可见） =================
-if not projects_df.empty:
+if selected_project is not None:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
 
-    # 读取历史数据（参数化查询）
-    history_df = pd.read_sql(
-        "SELECT * FROM history WHERE user_id = ? AND project_id = ? ORDER BY collected_at DESC",
-        conn,
-        params=(st.session_state.user_id, int(selected_project['id'])),
-        parse_dates=['collected_at']
-    )
+    # 读取历史数据（手动执行）
+    try:
+        cursor = conn.execute(
+            "SELECT * FROM history WHERE user_id = ? AND project_id = ? ORDER BY collected_at DESC",
+            (st.session_state.user_id, int(selected_project['id']))
+        )
+        data = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+        history_df = pd.DataFrame(data, columns=columns)
+        if not history_df.empty and 'collected_at' in history_df.columns:
+            history_df['collected_at'] = pd.to_datetime(history_df['collected_at'])
+    except Exception as e:
+        st.error(f"查询历史数据失败: {e}")
+        st.stop()
     
     if not history_df.empty:
         latest = history_df.iloc[0]
@@ -549,7 +566,15 @@ if st.session_state.auto_running and st.session_state.countdown > 0 and st.sessi
     st.session_state.countdown -= 1
     if st.session_state.countdown == 0:
         with st.spinner("正在执行定时采集所有项目..."):
-            projects = pd.read_sql("SELECT * FROM projects WHERE user_id = ?", conn, params=(st.session_state.user_id,))
+            try:
+                cursor = conn.execute("SELECT * FROM projects WHERE user_id = ?", (st.session_state.user_id,))
+                data = cursor.fetchall()
+                columns = [description[0] for description in cursor.description]
+                projects = pd.DataFrame(data, columns=columns)
+            except Exception as e:
+                st.error(f"定时采集查询失败: {e}")
+                projects = pd.DataFrame()
+            
             for _, row in projects.iterrows():
                 amount, supporters, err = get_makuake_data(row['url'])
                 if amount is not None:
