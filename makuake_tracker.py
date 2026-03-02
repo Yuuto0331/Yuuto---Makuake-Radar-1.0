@@ -108,17 +108,23 @@ def get_makuake_data(project_url):
     except Exception as e:
         return None, None, str(e)
 
-# ================= 数据库初始化（带用户表） =================
+# ================= 数据库初始化（重建表，确保 user_id 存在） =================
 def init_db():
     conn = sqlite3.connect('makuake.db')
     c = conn.cursor()
     
-    c.execute('''CREATE TABLE IF NOT EXISTS users
+    # 删除旧表（避免残留旧结构）
+    c.execute('DROP TABLE IF EXISTS history')
+    c.execute('DROP TABLE IF EXISTS projects')
+    c.execute('DROP TABLE IF EXISTS users')
+    
+    # 创建新表
+    c.execute('''CREATE TABLE users
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   username TEXT UNIQUE NOT NULL,
                   password TEXT NOT NULL)''')
     
-    c.execute('''CREATE TABLE IF NOT EXISTS projects 
+    c.execute('''CREATE TABLE projects 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   user_id INTEGER NOT NULL,
                   url TEXT,
@@ -126,7 +132,7 @@ def init_db():
                   interval INTEGER,
                   FOREIGN KEY(user_id) REFERENCES users(id))''')
     
-    c.execute('''CREATE TABLE IF NOT EXISTS history 
+    c.execute('''CREATE TABLE history 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   user_id INTEGER NOT NULL,
                   project_id INTEGER,
