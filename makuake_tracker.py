@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import re
+import os  # 新增：用于删除数据库文件
 
 # ================= Selenium 采集函数 =================
 from selenium import webdriver
@@ -235,6 +236,23 @@ with st.sidebar:
             st.info(f"⏳ 下次采集: {st.session_state.countdown} 秒")
     else:
         st.session_state.countdown = 0
+    
+    # ========== 新增：重置数据库按钮 ==========
+    st.divider()
+    if st.button("⚠️ 重置数据库（清空所有数据）", type="primary", use_container_width=True):
+        conn.close()
+        try:
+            os.remove("makuake.db")
+            st.success("数据库文件已删除，正在重新初始化...")
+            conn = init_db()
+            st.success("数据库已重置，请刷新页面")
+            st.rerun()
+        except FileNotFoundError:
+            st.info("数据库文件不存在，直接重新初始化")
+            conn = init_db()
+            st.rerun()
+        except Exception as e:
+            st.error(f"重置失败: {e}")
 
 # ================= 主界面 =================
 if not projects_df.empty:
