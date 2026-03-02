@@ -157,6 +157,11 @@ def authenticate_user(username, password):
         return result[0]
     return None
 
+def get_user_by_id(user_id):
+    c = conn.cursor()
+    c.execute("SELECT id, username FROM users WHERE id = ?", (user_id,))
+    return c.fetchone()
+
 def register_user(username, password):
     c = conn.cursor()
     try:
@@ -174,7 +179,7 @@ def save_history(user_id, project_id, amount, supporters):
               (user_id, project_id, amount, supporters, datetime.now(ZoneInfo("Asia/Shanghai"))))
     conn.commit()
 
-# ================= 会话状态初始化 =================
+# ================= 会话状态初始化（从 URL 参数恢复登录） =================
 if "auto_running" not in st.session_state:
     st.session_state.auto_running = False
 if "countdown" not in st.session_state:
@@ -185,6 +190,20 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = None
     st.session_state.username = None
+
+# 尝试从 URL 参数恢复登录
+query_params = st.experimental_get_query_params()
+if not st.session_state.logged_in and "user_id" in query_params:
+    try:
+        uid = int(query_params["user_id"][0])
+        user = get_user_by_id(uid)
+        if user:
+            st.session_state.logged_in = True
+            st.session_state.user_id = user[0]
+            st.session_state.username = user[1]
+    except:
+        # 参数无效，忽略
+        pass
 
 # ================= 页面配置 =================
 st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
@@ -224,6 +243,8 @@ with st.sidebar:
                 if st.form_submit_button("登录", use_container_width=True):
                     user_id = authenticate_user(login_user, login_pass)
                     if user_id:
+                        # 将用户ID存入 URL 参数，实现刷新后自动登录
+                        st.experimental_set_query_params(user_id=user_id)
                         st.session_state.logged_in = True
                         st.session_state.user_id = user_id
                         st.session_state.username = login_user
@@ -246,7 +267,8 @@ with st.sidebar:
                     else:
                         user_id = register_user(reg_user, reg_pass)
                         if user_id:
-                            # 注册成功后自动登录
+                            # 注册成功后自动登录，同样设置 URL 参数
+                            st.experimental_set_query_params(user_id=user_id)
                             st.session_state.logged_in = True
                             st.session_state.user_id = user_id
                             st.session_state.username = reg_user
@@ -265,43 +287,43 @@ with st.sidebar:
     new_title = st.text_input("项目名称（自定义）")
     new_url = st.text_input("Makuake 项目 URL")
     
- if st.button("开始监控", use_container_width=True):
-    if not new_title or not new_url:
-        st.warning("请填写项目名称和 URL")
-    elif "makuake.com/project/" not in new_url:
-        st.error("请输入有效的 Makuake 项目地址")
-    else:
-        c = conn.cursor()
-        try:
-            # 插入项目
-            c.execute("INSERT INTO projects (user_id, url, title, interval) VALUES (?, ?, ?, ?)", 
-                      (st.session_state.user_id, new_url, new_title, st.session_state.global_interval))
-            pid = c.lastrowid
-            conn.commit()
-            
-            # 采集初始数据
-            with st.spinner("正在采集初始数据..."):
-                try:
-                    amount, supporters, err = get_makuake_data(new_url)
-                    if amount is not None:
-                        save_history(st.session_state.user_id, pid, amount, supporters)
-                        st.success(f"项目 {new_title} 添加成功，已采集初始数据")
-                        st.rerun()
-                    else:
-                        # 采集失败，删除刚插入的项目
+    if st.button("开始监控", use_container_width=True):
+        if not new_title or not new_url:
+            st.warning("请填写项目名称和 URL")
+        elif "makuake.com/project/" not in new_url:
+            st.error("请输入有效的 Makuake 项目地址")
+        else:
+            c = conn.cursor()
+            try:
+                # 插入项目
+                c.execute("INSERT INTO projects (user_id, url, title, interval) VALUES (?, ?, ?, ?)", 
+                          (st.session_state.user_id, new_url, new_title, st.session_state.global_interval))
+                pid = c.lastrowid
+                conn.commit()
+                
+                # 采集初始数据
+                with st.spinner("正在采集初始数据..."):
+                    try:
+                        amount, supporters, err = get_makuake_data(new_url)
+                        if amount is not None:
+                            save_history(st.session_state.user_id, pid, amount, supporters)
+                            st.success(f"项目 {new_title} 添加成功，已采集初始数据")
+                            st.rerun()
+                        else:
+                            # 采集失败，删除刚插入的项目
+                            c.execute("DELETE FROM projects WHERE id = ?", (pid,))
+                            conn.commit()
+                            st.error(f"采集失败: {err}")
+                    except Exception as e:
+                        # 采集过程发生异常
                         c.execute("DELETE FROM projects WHERE id = ?", (pid,))
                         conn.commit()
-                        st.error(f"采集失败: {err}")
-                except Exception as e:
-                    # 采集过程发生异常
-                    c.execute("DELETE FROM projects WHERE id = ?", (pid,))
-                    conn.commit()
-                    st.error(f"采集过程异常: {str(e)}")
-        except sqlite3.IntegrityError:
-            st.warning("该项目已在监控列表中")
-        except Exception as e:
-            # 插入项目时发生其他异常
-            st.error(f"添加项目失败: {str(e)}")
+                        st.error(f"采集过程异常: {str(e)}")
+            except sqlite3.IntegrityError:
+                st.warning("该项目已在监控列表中")
+            except Exception as e:
+                # 插入项目时发生其他异常
+                st.error(f"添加项目失败: {str(e)}")
     
     st.divider()
     
@@ -329,7 +351,6 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("暂无监控项目")
-        # 后续代码依赖 selected_project，需要提前退出或赋空值
         selected_project = None
     
     st.divider()
@@ -361,8 +382,9 @@ with st.sidebar:
     
     st.divider()
     
-    # 登出按钮
+    # 登出按钮（清除 URL 参数）
     if st.button("🚪 登出", use_container_width=True):
+        st.experimental_set_query_params()  # 清除所有参数
         st.session_state.logged_in = False
         st.session_state.user_id = None
         st.session_state.username = None
@@ -601,5 +623,3 @@ if st.session_state.auto_running and st.session_state.countdown > 0 and st.sessi
         st.rerun()
     else:
         st.rerun()
-
-
