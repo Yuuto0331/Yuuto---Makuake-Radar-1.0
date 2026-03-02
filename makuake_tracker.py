@@ -266,30 +266,42 @@ with st.sidebar:
     new_url = st.text_input("Makuake 项目 URL")
     
     if st.button("开始监控", use_container_width=True):
-        if not new_title or not new_url:
-            st.warning("请填写项目名称和 URL")
-        elif "makuake.com/project/" not in new_url:
-            st.error("请输入有效的 Makuake 项目地址")
-        else:
-            c = conn.cursor()
-            try:
-                c.execute("INSERT INTO projects (user_id, url, title, interval) VALUES (?, ?, ?, ?)", 
-                          (st.session_state.user_id, new_url, new_title, st.session_state.global_interval))
-                pid = c.lastrowid
-                conn.commit()
-                
-                with st.spinner("正在采集初始数据..."):
+    if not new_title or not new_url:
+        st.warning("请填写项目名称和 URL")
+    elif "makuake.com/project/" not in new_url:
+        st.error("请输入有效的 Makuake 项目地址")
+    else:
+        c = conn.cursor()
+        try:
+            # 插入项目
+            c.execute("INSERT INTO projects (user_id, url, title, interval) VALUES (?, ?, ?, ?)", 
+                      (st.session_state.user_id, new_url, new_title, st.session_state.global_interval))
+            pid = c.lastrowid
+            conn.commit()
+            
+            # 采集初始数据
+            with st.spinner("正在采集初始数据..."):
+                try:
                     amount, supporters, err = get_makuake_data(new_url)
                     if amount is not None:
                         save_history(st.session_state.user_id, pid, amount, supporters)
                         st.success(f"项目 {new_title} 添加成功，已采集初始数据")
                         st.rerun()
                     else:
+                        # 采集失败，删除刚插入的项目
                         c.execute("DELETE FROM projects WHERE id = ?", (pid,))
                         conn.commit()
-                        st.error(f"初始数据采集失败: {err}")
-            except sqlite3.IntegrityError:
-                st.warning("该项目已在监控列表中")
+                        st.error(f"采集失败: {err}")
+                except Exception as e:
+                    # 采集过程发生异常
+                    c.execute("DELETE FROM projects WHERE id = ?", (pid,))
+                    conn.commit()
+                    st.error(f"采集过程异常: {str(e)}")
+        except sqlite3.IntegrityError:
+            st.warning("该项目已在监控列表中")
+        except Exception as e:
+            # 插入项目时发生其他异常
+            st.error(f"添加项目失败: {str(e)}")
     
     st.divider()
     
@@ -589,3 +601,4 @@ if st.session_state.auto_running and st.session_state.countdown > 0 and st.sessi
         st.rerun()
     else:
         st.rerun()
+
