@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo  # 新增：用于时区处理
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import re
@@ -123,8 +124,9 @@ conn = init_db()
 
 def save_history(project_id, amount, supporters):
     c = conn.cursor()
+    # 修改：使用中国时区（UTC+8），如需日本时间改为 Asia/Tokyo
     c.execute("INSERT INTO history (project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?)",
-              (project_id, amount, supporters, datetime.now()))
+              (project_id, amount, supporters, datetime.now(ZoneInfo("Asia/Shanghai"))))
     conn.commit()
 
 # ================= 会话状态初始化 =================
@@ -448,7 +450,7 @@ else:
 
 # 底部说明
 st.divider()
-st.caption("Makuake Tracker Pro v1.6 | 采集引擎：Selenium + ChromeDriver")
+st.caption("Makuake Tracker Pro v1.7 | 时区已修正为 Asia/Shanghai")
 
 # ================= 定时采集逻辑 =================
 if st.session_state.auto_running and st.session_state.countdown > 0:
