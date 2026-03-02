@@ -136,7 +136,15 @@ if "global_interval" not in st.session_state:
     st.session_state.global_interval = 3600
 
 # ================= 页面配置 =================
-st.set_page_config(page_title="Makuake Tracker Pro", layout="wide")
+st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
+
+# ================= 应用页头 =================
+st.markdown("""
+<div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 0; color: white; text-align: center; margin-bottom: 1rem;">
+    <h1 style="margin:0; font-size: 1.8rem;">Yuuto - Makuake Radar 1.0</h1>
+    <p style="margin:0; opacity:0.9;">Makuake 众筹项目智能监控工具</p>
+</div>
+""", unsafe_allow_html=True)
 
 # ================= 添加自定义CSS使表格居中对齐 =================
 st.markdown("""
@@ -406,7 +414,6 @@ if not projects_df.empty:
             else:
                 return ''
 
-        # 修复：处理可能出现的 NaT（空时间）
         styled_df = page_df.style.format({
             '采集时间': lambda x: x.strftime('%Y/%m/%d %H:%M') if pd.notna(x) else '',
             '応援購入総額': '¥{:,.0f}',
@@ -427,7 +434,7 @@ else:
     st.warning("请在左侧侧边栏添加您的第一个监控项目。")
 
 st.divider()
-st.caption("Makuake Tracker Pro v1.8 | 时区 Asia/Shanghai")
+st.caption("Yuuto - Makuake Radar 1.0 | 时区 Asia/Shanghai | 采集引擎：Selenium + ChromeDriver")
 
 # ================= 定时采集逻辑 =================
 if st.session_state.auto_running and st.session_state.countdown > 0:
