@@ -33,7 +33,11 @@ def get_makuake_data(project_url):
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
         options.add_argument("--lang=ja-JP")
 
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        # 使用硬编码的 ChromeDriver 版本（适配服务器上的 Chromium 145）
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager(version="145.0.7632.116").install()),
+            options=options
+        )
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         driver.get(project_url)
@@ -205,9 +209,9 @@ with st.sidebar:
     
     st.divider()
     
-    # 定时采集
+    # 定时采集（按分钟输入）
     st.subheader("⏰ 定时采集")
-    interval_min = st.number_input("采集间隔 (分钟)", min_value=1,     value=st.session_state.global_interval // 60, step=1)
+    interval_min = st.number_input("采集间隔 (分钟)", min_value=1, value=st.session_state.global_interval // 60, step=1)
     st.session_state.global_interval = interval_min * 60
     
     auto_run = st.checkbox("开启定时采集", value=st.session_state.auto_running)
@@ -292,7 +296,7 @@ if not projects_df.empty:
             df_plot = df_filtered.resample('H').last().dropna()
             time_unit = "小时"
         elif view_option == "自定义日期":
-            # 修复：使用 set 去重，避免 numpy.ndarray 没有 unique 的错误
+            # 修复日期去重错误
             available_dates = sorted(set(df_raw.index.date))
             if available_dates:
                 default_date = available_dates[-1]
@@ -333,7 +337,7 @@ if not projects_df.empty:
             
             # 柱状图：金额增量（加粗）
             colors = ['#10b981' if val >= 0 else '#ef4444' for val in df_plot['金额增长']]
-            bar_width = 1.0 if time_unit == "天" else 0.8
+            bar_width = 1.0  # 最大有效值
             fig.add_trace(
                 go.Bar(
                     x=df_plot['collected_at'],
@@ -353,7 +357,7 @@ if not projects_df.empty:
                 height=500,
                 margin=dict(l=40, r=40, t=20, b=80),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                bargap=0.02
+                bargap=0.02  # 减小柱子间距
             )
             
             # x轴设置：根据视图调整格式和刻度密度
@@ -369,8 +373,8 @@ if not projects_df.empty:
                 )
             
             # y轴格式优化
-            fig.update_yaxes(tickformat=',d', secondary_y=False)  # 金额主坐标轴使用千位分隔符
-            fig.update_yaxes(tickformat='+,d', secondary_y=True)  # 增量次坐标轴带符号千位分隔符
+            fig.update_yaxes(tickformat=',d', secondary_y=False)
+            fig.update_yaxes(tickformat='+,d', secondary_y=True)
             
             st.plotly_chart(fig, use_container_width=True)
         else:
