@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import re
-import hashlib  # 用于密码哈希
+import hashlib
 
 # ================= Selenium 采集函数 =================
 from selenium import webdriver
@@ -113,13 +113,11 @@ def init_db():
     conn = sqlite3.connect('makuake.db')
     c = conn.cursor()
     
-    # 用户表
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   username TEXT UNIQUE NOT NULL,
                   password TEXT NOT NULL)''')
     
-    # 项目表（增加 user_id 外键）
     c.execute('''CREATE TABLE IF NOT EXISTS projects 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   user_id INTEGER NOT NULL,
@@ -128,7 +126,6 @@ def init_db():
                   interval INTEGER,
                   FOREIGN KEY(user_id) REFERENCES users(id))''')
     
-    # 历史表（增加 user_id 外键）
     c.execute('''CREATE TABLE IF NOT EXISTS history 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   user_id INTEGER NOT NULL,
@@ -144,7 +141,6 @@ conn = init_db()
 
 # ================= 用户认证函数 =================
 def hash_password(password):
-    """简单 SHA256 哈希（内测可用，生产请换用 bcrypt 等）"""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def authenticate_user(username, password):
@@ -152,7 +148,7 @@ def authenticate_user(username, password):
     c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
     result = c.fetchone()
     if result and result[1] == hash_password(password):
-        return result[0]  # 返回用户ID
+        return result[0]
     return None
 
 def register_user(username, password):
@@ -163,7 +159,7 @@ def register_user(username, password):
         conn.commit()
         return c.lastrowid
     except sqlite3.IntegrityError:
-        return None  # 用户名已存在
+        return None
 
 # ================= 保存历史数据（带 user_id） =================
 def save_history(user_id, project_id, amount, supporters):
@@ -244,7 +240,10 @@ with st.sidebar:
                     else:
                         user_id = register_user(reg_user, reg_pass)
                         if user_id:
-                            st.success("注册成功，请登录")
+                            # 注册成功后自动登录
+                            st.session_state.logged_in = True
+                            st.session_state.user_id = user_id
+                            st.session_state.username = reg_user
                             st.rerun()
                         else:
                             st.error("用户名已存在")
@@ -290,7 +289,7 @@ with st.sidebar:
     
     # 项目列表（仅显示当前用户的项目）
     st.subheader("项目列表")
-    projects_df = pd.read_sql(f"SELECT * FROM projects WHERE user_id = {st.session_state.user_id}", conn)
+    projects_df = pd.read_sql("SELECT * FROM projects WHERE user_id = ?", conn, params=(st.session_state.user_id,))
     if not projects_df.empty:
         selected_title = st.selectbox("选择要查看的项目", projects_df['title'])
         selected_project = projects_df[projects_df['title'] == selected_title].iloc[0]
@@ -346,10 +345,11 @@ if not projects_df.empty:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
 
-    # 读取历史数据（按 user_id 和 project_id 过滤）
+    # 读取历史数据（参数化查询）
     history_df = pd.read_sql(
-        f"SELECT * FROM history WHERE user_id = {st.session_state.user_id} AND project_id = {selected_project['id']} ORDER BY collected_at DESC", 
-        conn, 
+        "SELECT * FROM history WHERE user_id = ? AND project_id = ? ORDER BY collected_at DESC",
+        conn,
+        params=(st.session_state.user_id, int(selected_project['id'])),
         parse_dates=['collected_at']
     )
     
@@ -491,7 +491,7 @@ if not projects_df.empty:
                     else:
                         st.error(f"采集失败: {err}")
 
-        # 准备表格数据（隐藏id, project_id，重命名列）
+        # 准备表格数据
         df_display = history_df.sort_values('collected_at').copy()
         df_display['金额增长'] = df_display['amount'].diff().fillna(0).astype(int)
         df_display['支持者增长'] = df_display['supporters'].diff().fillna(0).astype(int)
@@ -549,7 +549,7 @@ if st.session_state.auto_running and st.session_state.countdown > 0 and st.sessi
     st.session_state.countdown -= 1
     if st.session_state.countdown == 0:
         with st.spinner("正在执行定时采集所有项目..."):
-            projects = pd.read_sql(f"SELECT * FROM projects WHERE user_id = {st.session_state.user_id}", conn)
+            projects = pd.read_sql("SELECT * FROM projects WHERE user_id = ?", conn, params=(st.session_state.user_id,))
             for _, row in projects.iterrows():
                 amount, supporters, err = get_makuake_data(row['url'])
                 if amount is not None:
