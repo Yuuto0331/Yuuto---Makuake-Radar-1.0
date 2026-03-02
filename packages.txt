@@ -1,5 +1,2 @@
-# packages.txt
-chromium-browser
-chromium-chromedriver
-build-essential
-python3-dev
+chromium
+chromium-driver
