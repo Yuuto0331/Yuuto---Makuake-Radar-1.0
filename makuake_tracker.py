@@ -33,9 +33,9 @@ def get_makuake_data(project_url):
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
         options.add_argument("--lang=ja-JP")
 
-        # 使用硬编码的 ChromeDriver 版本（适配服务器上的 Chromium 145）
+        # 使用 driver_version 参数指定 ChromeDriver 版本
         driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager(version="145.0.7632.116").install()),
+            service=Service(ChromeDriverManager(driver_version="145.0.7632.116").install()),
             options=options
         )
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
