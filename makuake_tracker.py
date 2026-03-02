@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import re
-import hashlib
 
 # ================= Selenium 采集函数 =================
 from selenium import webdriver
@@ -108,101 +107,33 @@ def get_makuake_data(project_url):
     except Exception as e:
         return None, None, str(e)
 
-# ================= 数据库初始化（重建表，确保 user_id 存在） =================
+# ================= 数据库初始化 =================
 def init_db():
     conn = sqlite3.connect('makuake.db')
     c = conn.cursor()
-    
-    # 删除旧表（避免残留旧结构）
-    c.execute('DROP TABLE IF EXISTS history')
-    c.execute('DROP TABLE IF EXISTS projects')
-    c.execute('DROP TABLE IF EXISTS users')
-    
-    # 创建新表
-    c.execute('''CREATE TABLE users
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  username TEXT UNIQUE NOT NULL,
-                  password TEXT NOT NULL)''')
-    
-    c.execute('''CREATE TABLE projects 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id INTEGER NOT NULL,
-                  url TEXT,
-                  title TEXT,
-                  interval INTEGER,
-                  FOREIGN KEY(user_id) REFERENCES users(id))''')
-    
-    c.execute('''CREATE TABLE history 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id INTEGER NOT NULL,
-                  project_id INTEGER,
-                  amount INTEGER,
-                  supporters INTEGER,
-                  collected_at TIMESTAMP,
-                  FOREIGN KEY(user_id) REFERENCES users(id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS projects 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT UNIQUE, title TEXT, interval INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS history 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, amount INTEGER, 
+                  supporters INTEGER, collected_at TIMESTAMP, FOREIGN KEY(project_id) REFERENCES projects(id))''')
     conn.commit()
     return conn
 
 conn = init_db()
 
-# ================= 用户认证函数 =================
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def authenticate_user(username, password):
+def save_history(project_id, amount, supporters):
     c = conn.cursor()
-    c.execute("SELECT id, password FROM users WHERE username = ?", (username,))
-    result = c.fetchone()
-    if result and result[1] == hash_password(password):
-        return result[0]
-    return None
-
-def get_user_by_id(user_id):
-    c = conn.cursor()
-    c.execute("SELECT id, username FROM users WHERE id = ?", (user_id,))
-    return c.fetchone()
-
-def register_user(username, password):
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)",
-                  (username, hash_password(password)))
-        conn.commit()
-        return c.lastrowid
-    except sqlite3.IntegrityError:
-        return None
-
-# ================= 保存历史数据（带 user_id） =================
-def save_history(user_id, project_id, amount, supporters):
-    c = conn.cursor()
-    c.execute("INSERT INTO history (user_id, project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?, ?)",
-              (user_id, project_id, amount, supporters, datetime.now(ZoneInfo("Asia/Shanghai"))))
+    c.execute("INSERT INTO history (project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?)",
+              (project_id, amount, supporters, datetime.now(ZoneInfo("Asia/Shanghai"))))
     conn.commit()
 
-# ================= 会话状态初始化（从 URL 参数恢复登录） =================
+# ================= 会话状态初始化 =================
 if "auto_running" not in st.session_state:
     st.session_state.auto_running = False
 if "countdown" not in st.session_state:
     st.session_state.countdown = 0
 if "global_interval" not in st.session_state:
     st.session_state.global_interval = 3600
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.user_id = None
-    st.session_state.username = None
-
-# 尝试从 URL 参数恢复登录（新 API）
-if not st.session_state.logged_in and "user_id" in st.query_params:
-    try:
-        uid = int(st.query_params["user_id"])
-        user = get_user_by_id(uid)
-        if user:
-            st.session_state.logged_in = True
-            st.session_state.user_id = user[0]
-            st.session_state.username = user[1]
-    except:
-        # 参数无效，忽略
-        pass
 
 # ================= 页面配置 =================
 st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
@@ -227,61 +158,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 侧边栏（登录/注册 + 主功能） =================
+# ================= 侧边栏 =================
 with st.sidebar:
-    # 如果未登录，显示登录/注册界面
-    if not st.session_state.logged_in:
-        st.title("🔐 用户登录")
-        
-        tab_login, tab_register = st.tabs(["登录", "注册"])
-        
-        with tab_login:
-            with st.form("login_form"):
-                login_user = st.text_input("用户名")
-                login_pass = st.text_input("密码", type="password")
-                if st.form_submit_button("登录", use_container_width=True):
-                    user_id = authenticate_user(login_user, login_pass)
-                    if user_id:
-                        # 将用户ID存入 URL 参数，实现刷新后自动登录（新 API）
-                        st.query_params["user_id"] = str(user_id)
-                        st.session_state.logged_in = True
-                        st.session_state.user_id = user_id
-                        st.session_state.username = login_user
-                        st.rerun()
-                    else:
-                        st.error("用户名或密码错误")
-        
-        with tab_register:
-            with st.form("register_form"):
-                reg_user = st.text_input("用户名")
-                reg_pass = st.text_input("密码", type="password")
-                reg_confirm = st.text_input("确认密码", type="password")
-                if st.form_submit_button("注册", use_container_width=True):
-                    if reg_pass != reg_confirm:
-                        st.error("两次密码不一致")
-                    elif len(reg_user) < 3:
-                        st.error("用户名至少3个字符")
-                    elif len(reg_pass) < 3:
-                        st.error("密码至少3个字符")
-                    else:
-                        user_id = register_user(reg_user, reg_pass)
-                        if user_id:
-                            # 注册成功后自动登录，同样设置 URL 参数
-                            st.query_params["user_id"] = str(user_id)
-                            st.session_state.logged_in = True
-                            st.session_state.user_id = user_id
-                            st.session_state.username = reg_user
-                            st.rerun()
-                        else:
-                            st.error("用户名已存在")
-        
-        st.stop()  # 未登录时不再显示主界面
+    st.title("⚙️ 控制中心")
     
-    # 已登录，显示主功能
-    st.title(f"👋 欢迎, {st.session_state.username}")
     st.divider()
     
-    # 添加新项目
     st.subheader("添加新项目")
     new_title = st.text_input("项目名称（自定义）")
     new_url = st.text_input("Makuake 项目 URL")
@@ -294,67 +176,42 @@ with st.sidebar:
         else:
             c = conn.cursor()
             try:
-                # 插入项目
-                c.execute("INSERT INTO projects (user_id, url, title, interval) VALUES (?, ?, ?, ?)", 
-                          (st.session_state.user_id, new_url, new_title, st.session_state.global_interval))
+                c.execute("INSERT INTO projects (url, title, interval) VALUES (?, ?, ?)", 
+                          (new_url, new_title, st.session_state.global_interval))
                 pid = c.lastrowid
                 conn.commit()
                 
-                # 采集初始数据
                 with st.spinner("正在采集初始数据..."):
-                    try:
-                        amount, supporters, err = get_makuake_data(new_url)
-                        if amount is not None:
-                            save_history(st.session_state.user_id, pid, amount, supporters)
-                            st.success(f"项目 {new_title} 添加成功，已采集初始数据")
-                            st.rerun()
-                        else:
-                            # 采集失败，删除刚插入的项目
-                            c.execute("DELETE FROM projects WHERE id = ?", (pid,))
-                            conn.commit()
-                            st.error(f"采集失败: {err}")
-                    except Exception as e:
-                        # 采集过程发生异常
+                    amount, supporters, err = get_makuake_data(new_url)
+                    if amount is not None:
+                        save_history(pid, amount, supporters)
+                        st.success(f"项目 {new_title} 添加成功，已采集初始数据")
+                        st.rerun()
+                    else:
                         c.execute("DELETE FROM projects WHERE id = ?", (pid,))
                         conn.commit()
-                        st.error(f"采集过程异常: {str(e)}")
+                        st.error(f"初始数据采集失败: {err}")
             except sqlite3.IntegrityError:
                 st.warning("该项目已在监控列表中")
-            except Exception as e:
-                # 插入项目时发生其他异常
-                st.error(f"添加项目失败: {str(e)}")
     
     st.divider()
     
-    # 项目列表（手动执行查询，避免 pd.read_sql 参数问题）
     st.subheader("项目列表")
-    try:
-        cursor = conn.execute("SELECT * FROM projects WHERE user_id = ?", (st.session_state.user_id,))
-        data = cursor.fetchall()
-        columns = [description[0] for description in cursor.description]
-        projects_df = pd.DataFrame(data, columns=columns)
-    except Exception as e:
-        st.error(f"查询项目失败: {e}")
-        st.stop()
-    
+    projects_df = pd.read_sql("SELECT * FROM projects", conn)
     if not projects_df.empty:
         selected_title = st.selectbox("选择要查看的项目", projects_df['title'])
         selected_project = projects_df[projects_df['title'] == selected_title].iloc[0]
         if st.button("🗑️ 删除当前项目", type="secondary"):
             c = conn.cursor()
-            c.execute("DELETE FROM history WHERE user_id = ? AND project_id = ?", 
-                      (st.session_state.user_id, int(selected_project['id'])))
-            c.execute("DELETE FROM projects WHERE user_id = ? AND id = ?", 
-                      (st.session_state.user_id, int(selected_project['id'])))
+            c.execute("DELETE FROM history WHERE project_id = ?", (int(selected_project['id']),))
+            c.execute("DELETE FROM projects WHERE id = ?", (int(selected_project['id']),))
             conn.commit()
             st.rerun()
     else:
         st.info("暂无监控项目")
-        selected_project = None
     
     st.divider()
     
-    # 定时采集
     st.subheader("⏰ 定时采集")
     interval_min = st.number_input("采集间隔 (分钟)", min_value=1, value=st.session_state.global_interval // 60, step=1)
     st.session_state.global_interval = interval_min * 60
@@ -378,36 +235,17 @@ with st.sidebar:
             st.info(f"⏳ 下次采集: {st.session_state.countdown} 秒")
     else:
         st.session_state.countdown = 0
-    
-    st.divider()
-    
-    # 登出按钮（清除 URL 参数）
-    if st.button("🚪 登出", use_container_width=True):
-        st.query_params.clear()  # 清除所有参数
-        st.session_state.logged_in = False
-        st.session_state.user_id = None
-        st.session_state.username = None
-        st.rerun()
 
-# ================= 主界面（仅登录用户可见） =================
-if selected_project is not None:
+# ================= 主界面 =================
+if not projects_df.empty:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
 
-    # 读取历史数据（手动执行）
-    try:
-        cursor = conn.execute(
-            "SELECT * FROM history WHERE user_id = ? AND project_id = ? ORDER BY collected_at DESC",
-            (st.session_state.user_id, int(selected_project['id']))
-        )
-        data = cursor.fetchall()
-        columns = [description[0] for description in cursor.description]
-        history_df = pd.DataFrame(data, columns=columns)
-        if not history_df.empty and 'collected_at' in history_df.columns:
-            history_df['collected_at'] = pd.to_datetime(history_df['collected_at'])
-    except Exception as e:
-        st.error(f"查询历史数据失败: {e}")
-        st.stop()
+    history_df = pd.read_sql(
+        f"SELECT * FROM history WHERE project_id = {selected_project['id']} ORDER BY collected_at DESC", 
+        conn, 
+        parse_dates=['collected_at']
+    )
     
     if not history_df.empty:
         latest = history_df.iloc[0]
@@ -541,13 +379,12 @@ if selected_project is not None:
                 with st.spinner("正在采集最新数据..."):
                     amount, supporters, err = get_makuake_data(selected_project['url'])
                     if amount is not None:
-                        save_history(st.session_state.user_id, selected_project['id'], amount, supporters)
+                        save_history(selected_project['id'], amount, supporters)
                         st.success("同步成功")
                         st.rerun()
                     else:
                         st.error(f"采集失败: {err}")
 
-        # 准备表格数据
         df_display = history_df.sort_values('collected_at').copy()
         df_display['金额增长'] = df_display['amount'].diff().fillna(0).astype(int)
         df_display['支持者增长'] = df_display['supporters'].diff().fillna(0).astype(int)
@@ -594,30 +431,22 @@ if selected_project is not None:
         st.info("暂无历史数据")
 
 else:
-    st.info("请在左侧侧边栏添加您的第一个监控项目。")
+    st.warning("请在左侧侧边栏添加您的第一个监控项目。")
 
 st.divider()
 st.caption("Yuuto - Makuake Radar 1.0 | 时区 Asia/Shanghai | 采集引擎：Selenium + ChromeDriver")
 
-# ================= 定时采集逻辑（仅对当前用户） =================
-if st.session_state.auto_running and st.session_state.countdown > 0 and st.session_state.logged_in:
+# ================= 定时采集逻辑 =================
+if st.session_state.auto_running and st.session_state.countdown > 0:
     time.sleep(1)
     st.session_state.countdown -= 1
     if st.session_state.countdown == 0:
         with st.spinner("正在执行定时采集所有项目..."):
-            try:
-                cursor = conn.execute("SELECT * FROM projects WHERE user_id = ?", (st.session_state.user_id,))
-                data = cursor.fetchall()
-                columns = [description[0] for description in cursor.description]
-                projects = pd.DataFrame(data, columns=columns)
-            except Exception as e:
-                st.error(f"定时采集查询失败: {e}")
-                projects = pd.DataFrame()
-            
+            projects = pd.read_sql("SELECT * FROM projects", conn)
             for _, row in projects.iterrows():
                 amount, supporters, err = get_makuake_data(row['url'])
                 if amount is not None:
-                    save_history(st.session_state.user_id, row['id'], amount, supporters)
+                    save_history(row['id'], amount, supporters)
         st.session_state.countdown = st.session_state.global_interval
         st.rerun()
     else:
