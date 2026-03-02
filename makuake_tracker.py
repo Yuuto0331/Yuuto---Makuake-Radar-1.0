@@ -265,7 +265,7 @@ with st.sidebar:
     new_title = st.text_input("项目名称（自定义）")
     new_url = st.text_input("Makuake 项目 URL")
     
-    if st.button("开始监控", use_container_width=True):
+ if st.button("开始监控", use_container_width=True):
     if not new_title or not new_url:
         st.warning("请填写项目名称和 URL")
     elif "makuake.com/project/" not in new_url:
@@ -601,4 +601,5 @@ if st.session_state.auto_running and st.session_state.countdown > 0 and st.sessi
         st.rerun()
     else:
         st.rerun()
+
 
