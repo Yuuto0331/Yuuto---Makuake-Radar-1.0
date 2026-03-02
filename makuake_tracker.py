@@ -3,7 +3,7 @@ import pandas as pd
 import sqlite3
 import time
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo  # 新增：用于时区处理
+from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import re
@@ -34,7 +34,6 @@ def get_makuake_data(project_url):
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
         options.add_argument("--lang=ja-JP")
 
-        # 使用 driver_version 参数指定 ChromeDriver 版本
         driver = webdriver.Chrome(
             service=Service(ChromeDriverManager(driver_version="145.0.7632.116").install()),
             options=options
@@ -124,7 +123,6 @@ conn = init_db()
 
 def save_history(project_id, amount, supporters):
     c = conn.cursor()
-    # 修改：使用中国时区（UTC+8），如需日本时间改为 Asia/Tokyo
     c.execute("INSERT INTO history (project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?)",
               (project_id, amount, supporters, datetime.now(ZoneInfo("Asia/Shanghai"))))
     conn.commit()
@@ -143,7 +141,6 @@ st.set_page_config(page_title="Makuake Tracker Pro", layout="wide")
 # ================= 添加自定义CSS使表格居中对齐 =================
 st.markdown("""
 <style>
-    /* 表格所有单元格内容居中对齐 */
     .stDataFrame table td {
         text-align: center !important;
     }
@@ -159,7 +156,6 @@ with st.sidebar:
     
     st.divider()
     
-    # 添加新项目
     st.subheader("添加新项目")
     new_title = st.text_input("项目名称（自定义）")
     new_url = st.text_input("Makuake 项目 URL")
@@ -170,7 +166,6 @@ with st.sidebar:
         elif "makuake.com/project/" not in new_url:
             st.error("请输入有效的 Makuake 项目地址")
         else:
-            # 插入项目到数据库
             c = conn.cursor()
             try:
                 c.execute("INSERT INTO projects (url, title, interval) VALUES (?, ?, ?)", 
@@ -178,7 +173,6 @@ with st.sidebar:
                 pid = c.lastrowid
                 conn.commit()
                 
-                # 初始采集
                 with st.spinner("正在采集初始数据..."):
                     amount, supporters, err = get_makuake_data(new_url)
                     if amount is not None:
@@ -194,7 +188,6 @@ with st.sidebar:
     
     st.divider()
     
-    # 项目列表
     st.subheader("项目列表")
     projects_df = pd.read_sql("SELECT * FROM projects", conn)
     if not projects_df.empty:
@@ -211,7 +204,6 @@ with st.sidebar:
     
     st.divider()
     
-    # 定时采集（按分钟输入）
     st.subheader("⏰ 定时采集")
     interval_min = st.number_input("采集间隔 (分钟)", min_value=1, value=st.session_state.global_interval // 60, step=1)
     st.session_state.global_interval = interval_min * 60
@@ -241,7 +233,6 @@ if not projects_df.empty:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
 
-    # 读取历史数据，并将 collected_at 解析为 datetime
     history_df = pd.read_sql(
         f"SELECT * FROM history WHERE project_id = {selected_project['id']} ORDER BY collected_at DESC", 
         conn, 
@@ -263,11 +254,9 @@ if not projects_df.empty:
             st.metric("采集状态", "运行中" if st.session_state.auto_running else "手动", 
                       "定时" if st.session_state.auto_running else "手动")
 
-        # 增长趋势分析（视图选择和柱状图）
         st.divider()
         st.subheader("📈 增长趋势分析")
         
-        # 视图选择
         view_option = st.radio(
             "选择时间范围",
             ["全程", "30天", "7天", "今天", "自定义日期"],
@@ -275,7 +264,6 @@ if not projects_df.empty:
             key="view_selector"
         )
         
-        # 根据视图处理数据
         df_raw = history_df.sort_values('collected_at').copy()
         df_raw.set_index('collected_at', inplace=True)
         
@@ -298,7 +286,6 @@ if not projects_df.empty:
             df_plot = df_filtered.resample('H').last().dropna()
             time_unit = "小时"
         elif view_option == "自定义日期":
-            # 修复日期去重错误
             available_dates = sorted(set(df_raw.index.date))
             if available_dates:
                 default_date = available_dates[-1]
@@ -315,7 +302,6 @@ if not projects_df.empty:
                 df_plot = pd.DataFrame()
         
         if not df_plot.empty:
-            # 计算增量
             df_plot['金额增长'] = df_plot['amount'].diff().fillna(0).astype(int)
             df_plot['支持者增长'] = df_plot['supporters'].diff().fillna(0).astype(int)
             
@@ -324,7 +310,6 @@ if not projects_df.empty:
             
             fig = make_subplots(specs=[[{"secondary_y": True}]])
             
-            # 折线图：金额
             fig.add_trace(
                 go.Scatter(
                     x=df_plot['collected_at'],
@@ -337,9 +322,8 @@ if not projects_df.empty:
                 secondary_y=False
             )
             
-            # 柱状图：金额增量（加粗）
             colors = ['#10b981' if val >= 0 else '#ef4444' for val in df_plot['金额增长']]
-            bar_width = 1.0  # 最大有效值
+            bar_width = 1.0
             fig.add_trace(
                 go.Bar(
                     x=df_plot['collected_at'],
@@ -352,29 +336,25 @@ if not projects_df.empty:
                 secondary_y=True
             )
             
-            # 布局
             fig.update_layout(
                 hovermode="x unified",
                 template="plotly_white",
                 height=500,
                 margin=dict(l=40, r=40, t=20, b=80),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                bargap=0.02  # 减小柱子间距
+                bargap=0.02
             )
             
-            # x轴设置：根据视图调整格式和刻度密度
             if time_unit == "天":
                 fig.update_xaxes(tickformat="%m-%d", tickangle=45, nticks=min(15, len(df_plot)))
             else:
-                # 小时视图：强制每隔1小时显示一个刻度
                 fig.update_xaxes(
                     tickformat="%H:%M",
                     tickangle=45,
-                    dtick=3600000,  # 1小时（单位毫秒）
+                    dtick=3600000,
                     tickmode='linear'
                 )
             
-            # y轴格式优化
             fig.update_yaxes(tickformat=',d', secondary_y=False)
             fig.update_yaxes(tickformat='+,d', secondary_y=True)
             
@@ -382,7 +362,6 @@ if not projects_df.empty:
         else:
             st.info("所选时间范围内无数据")
 
-        # 历史明细
         st.divider()
         col_a, col_b = st.columns([2, 1])
         with col_a:
@@ -398,7 +377,6 @@ if not projects_df.empty:
                     else:
                         st.error(f"采集失败: {err}")
 
-        # 准备表格数据（隐藏id, project_id，重命名列）
         df_display = history_df.sort_values('collected_at').copy()
         df_display['金额增长'] = df_display['amount'].diff().fillna(0).astype(int)
         df_display['支持者增长'] = df_display['supporters'].diff().fillna(0).astype(int)
@@ -428,15 +406,15 @@ if not projects_df.empty:
             else:
                 return ''
 
+        # 修复：处理可能出现的 NaT（空时间）
         styled_df = page_df.style.format({
-            '采集时间': lambda x: x.strftime('%Y/%m/%d %H:%M'),
+            '采集时间': lambda x: x.strftime('%Y/%m/%d %H:%M') if pd.notna(x) else '',
             '応援購入総額': '¥{:,.0f}',
             'サポーター': '{:,.0f} 人',
             '金額増加': lambda x: f'+¥{x:,.0f}' if x > 0 else (f'¥{x:,.0f}' if x < 0 else '0'),
             'サポーター増加': lambda x: f'+{x:,.0f}' if x > 0 else (f'{x:,.0f}' if x < 0 else '0')
         }).applymap(highlight_change, subset=['金額増加', 'サポーター増加'])
 
-        # 隐藏索引列
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
         csv = history_df.to_csv(index=False).encode('utf-8')
@@ -448,9 +426,8 @@ if not projects_df.empty:
 else:
     st.warning("请在左侧侧边栏添加您的第一个监控项目。")
 
-# 底部说明
 st.divider()
-st.caption("Makuake Tracker Pro v1.7 | 时区已修正为 Asia/Shanghai")
+st.caption("Makuake Tracker Pro v1.8 | 时区 Asia/Shanghai")
 
 # ================= 定时采集逻辑 =================
 if st.session_state.auto_running and st.session_state.countdown > 0:
