@@ -138,6 +138,9 @@ if "global_interval" not in st.session_state:
 # 用于页面滚动标记
 if "scroll_to_top" not in st.session_state:
     st.session_state.scroll_to_top = False
+# 用于记录当前选中的项目ID
+if "selected_project_id" not in st.session_state:
+    st.session_state.selected_project_id = None
 
 # ================= 页面配置 =================
 st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
@@ -270,8 +273,6 @@ with st.sidebar:
             st.info(f"⏳ 下次采集: {st.session_state.countdown} 秒")
     else:
         st.session_state.countdown = 0
-    
-    # 重置数据库按钮已删除，避免误操作
 
 # ================= 主界面 =================
 if selected_project is not None:
@@ -516,6 +517,8 @@ if st.session_state.auto_running and st.session_state.countdown > 0:
         st.rerun()
 
 # ================= 切换项目时触发滚动 =================
-if st.session_state.get("selected_project") != selected_project:
-    st.session_state.scroll_to_top = True
-    st.session_state.selected_project = selected_project
+if selected_project is not None:
+    current_id = selected_project['id']
+    if st.session_state.get("selected_project_id") != current_id:
+        st.session_state.scroll_to_top = True
+        st.session_state.selected_project_id = current_id
