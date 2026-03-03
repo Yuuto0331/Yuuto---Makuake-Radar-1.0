@@ -135,6 +135,9 @@ if "countdown" not in st.session_state:
     st.session_state.countdown = 0
 if "global_interval" not in st.session_state:
     st.session_state.global_interval = 3600
+# 用于页面滚动标记
+if "scroll_to_top" not in st.session_state:
+    st.session_state.scroll_to_top = False
 
 # ================= 页面配置 =================
 st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
@@ -159,7 +162,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 受保护的数据库下载接口（无需密码） =================
+# ================= 自动滚动到顶部的逻辑 =================
+if st.session_state.scroll_to_top:
+    st.components.v1.html(
+        """
+        <script>
+            window.scrollTo(0, 0);
+        </script>
+        """,
+        height=0,
+    )
+    st.session_state.scroll_to_top = False  # 重置标记
+
+# ================= 数据库下载接口（无密码） =================
 query_params = st.query_params
 if "download_db" in query_params:
     try:
@@ -171,7 +186,7 @@ if "download_db" in query_params:
             file_name="makuake.db",
             mime="application/octet-stream"
         )
-        st.stop()  # 停止渲染其他内容，只显示下载按钮
+        st.stop()
     except FileNotFoundError:
         st.error("数据库文件不存在")
         st.stop()
@@ -227,6 +242,7 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("暂无监控项目")
+        selected_project = None
     
     st.divider()
     
@@ -254,7 +270,6 @@ with st.sidebar:
     else:
         st.session_state.countdown = 0
     
-    # ========== 重置数据库按钮（可选） ==========
     st.divider()
     if st.button("⚠️ 重置数据库（清空所有数据）", type="primary", use_container_width=True):
         conn.close()
@@ -272,10 +287,11 @@ with st.sidebar:
             st.error(f"重置失败: {e}")
 
 # ================= 主界面 =================
-if not projects_df.empty:
+if selected_project is not None:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
 
+    # 读取历史数据
     history_df = pd.read_sql(
         f"SELECT * FROM history WHERE project_id = {selected_project['id']} ORDER BY collected_at DESC", 
         conn, 
@@ -283,17 +299,33 @@ if not projects_df.empty:
     )
     
     if not history_df.empty:
+        # ---------- 计算当天增量 ----------
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        today_data = history_df[history_df['collected_at'].dt.date == today].sort_values('collected_at')
+        if len(today_data) >= 2:
+            today_amount_inc = today_data['amount'].iloc[-1] - today_data['amount'].iloc[0]
+            today_supporters_inc = today_data['supporters'].iloc[-1] - today_data['supporters'].iloc[0]
+        elif len(today_data) == 1:
+            today_amount_inc = 0
+            today_supporters_inc = 0
+        else:
+            today_amount_inc = None
+            today_supporters_inc = None
+
+        # 最新记录
         latest = history_df.iloc[0]
-        prev = history_df.iloc[1] if len(history_df) > 1 else latest
         
-        col1, col2, col3 = st.columns(3)
+        # 顶部指标：改为四列
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            delta_amount = latest['amount'] - prev['amount']
-            st.metric("当前筹得额 (円)", f"¥{latest['amount']:,}", f"{delta_amount:+,}")
+            st.metric("当前筹得额 (円)", f"¥{latest['amount']:,}")
         with col2:
-            delta_supporters = latest['supporters'] - prev['supporters']
-            st.metric("支持者人数", f"{latest['supporters']:,} 人", f"{delta_supporters:+,}")
+            st.metric("支持者人数", f"{latest['supporters']:,} 人")
         with col3:
+            # 显示今天销售增量（仅金额）
+            delta_display = f"{today_amount_inc:+,}" if today_amount_inc is not None else "暂无数据"
+            st.metric("今日销售增量 (円)", delta_display)
+        with col4:
             st.metric("采集状态", "运行中" if st.session_state.auto_running else "手动", 
                       "定时" if st.session_state.auto_running else "手动")
 
@@ -324,9 +356,8 @@ if not projects_df.empty:
             df_plot = df_filtered.resample('D').last().dropna()
             time_unit = "天"
         elif view_option == "今天":
-            today = df_raw.index.max().date()
-            df_filtered = df_raw[df_raw.index.date == today]
-            df_plot = df_filtered.resample('H').last().dropna()
+            today_data = df_raw[df_raw.index.date == df_raw.index.max().date()]
+            df_plot = today_data.resample('H').last().dropna()
             time_unit = "小时"
         elif view_option == "自定义日期":
             available_dates = sorted(set(df_raw.index.date))
@@ -353,6 +384,7 @@ if not projects_df.empty:
             
             fig = make_subplots(specs=[[{"secondary_y": True}]])
             
+            # 金额折线图
             fig.add_trace(
                 go.Scatter(
                     x=df_plot['collected_at'],
@@ -365,6 +397,7 @@ if not projects_df.empty:
                 secondary_y=False
             )
             
+            # 金额增量柱状图（添加customdata为支持者增量，用于hover）
             colors = ['#10b981' if val >= 0 else '#ef4444' for val in df_plot['金额增长']]
             bar_width = 1.0
             fig.add_trace(
@@ -374,7 +407,13 @@ if not projects_df.empty:
                     name="金额增量",
                     marker=dict(color=colors, line=dict(width=1.5, color='#333')),
                     opacity=0.8,
-                    width=bar_width
+                    width=bar_width,
+                    customdata=df_plot['支持者增长'],  # 添加支持者增量作为自定义数据
+                    hovertemplate=
+                        "<b>时间</b>: %{x}<br>" +
+                        "<b>金额增量</b>: %{y:+,d} 円<br>" +
+                        "<b>支持者增量</b>: %{customdata:+,d} 人<br>" +
+                        "<extra></extra>"
                 ),
                 secondary_y=True
             )
@@ -420,6 +459,7 @@ if not projects_df.empty:
                     else:
                         st.error(f"采集失败: {err}")
 
+        # 表格数据
         df_display = history_df.sort_values('collected_at').copy()
         df_display['金额增长'] = df_display['amount'].diff().fillna(0).astype(int)
         df_display['支持者增长'] = df_display['supporters'].diff().fillna(0).astype(int)
@@ -486,3 +526,9 @@ if st.session_state.auto_running and st.session_state.countdown > 0:
         st.rerun()
     else:
         st.rerun()
+
+# ================= 切换项目时触发滚动 =================
+# 在侧边栏项目选择后，设置滚动标记
+if st.session_state.get("selected_project") != selected_project:
+    st.session_state.scroll_to_top = True
+    st.session_state.selected_project = selected_project
