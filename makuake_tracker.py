@@ -197,39 +197,40 @@ with st.sidebar:
     
     st.divider()
     
-    st.subheader("添加新项目")
-    new_title = st.text_input("项目名称（自定义）")
-    new_url = st.text_input("Makuake 项目 URL")
-    
-    if st.button("开始监控", use_container_width=True):
-        if not new_title or not new_url:
-            st.warning("请填写项目名称和 URL")
-        elif "makuake.com/project/" not in new_url:
-            st.error("请输入有效的 Makuake 项目地址")
-        else:
-            c = conn.cursor()
-            try:
-                c.execute("INSERT INTO projects (url, title, interval) VALUES (?, ?, ?)", 
-                          (new_url, new_title, st.session_state.global_interval))
-                pid = c.lastrowid
-                conn.commit()
-                
-                with st.spinner("正在采集初始数据..."):
-                    amount, supporters, err = get_makuake_data(new_url)
-                    if amount is not None:
-                        save_history(pid, amount, supporters)
-                        st.success(f"项目 {new_title} 添加成功，已采集初始数据")
-                        st.rerun()
-                    else:
-                        c.execute("DELETE FROM projects WHERE id = ?", (pid,))
-                        conn.commit()
-                        st.error(f"初始数据采集失败: {err}")
-            except sqlite3.IntegrityError:
-                st.warning("该项目已在监控列表中")
+    # 将添加新项目放入可折叠展开器，节省空间
+    with st.expander("➕ 添加新项目", expanded=True):
+        new_title = st.text_input("项目名称（自定义）")
+        new_url = st.text_input("Makuake 项目 URL")
+        
+        if st.button("开始监控", use_container_width=True):
+            if not new_title or not new_url:
+                st.warning("请填写项目名称和 URL")
+            elif "makuake.com/project/" not in new_url:
+                st.error("请输入有效的 Makuake 项目地址")
+            else:
+                c = conn.cursor()
+                try:
+                    c.execute("INSERT INTO projects (url, title, interval) VALUES (?, ?, ?)", 
+                              (new_url, new_title, st.session_state.global_interval))
+                    pid = c.lastrowid
+                    conn.commit()
+                    
+                    with st.spinner("正在采集初始数据..."):
+                        amount, supporters, err = get_makuake_data(new_url)
+                        if amount is not None:
+                            save_history(pid, amount, supporters)
+                            st.success(f"项目 {new_title} 添加成功，已采集初始数据")
+                            st.rerun()
+                        else:
+                            c.execute("DELETE FROM projects WHERE id = ?", (pid,))
+                            conn.commit()
+                            st.error(f"初始数据采集失败: {err}")
+                except sqlite3.IntegrityError:
+                    st.warning("该项目已在监控列表中")
     
     st.divider()
     
-    st.subheader("项目列表")
+    st.subheader("📌 项目列表")
     projects_df = pd.read_sql("SELECT * FROM projects", conn)
     if not projects_df.empty:
         selected_title = st.selectbox("选择要查看的项目", projects_df['title'])
@@ -270,21 +271,7 @@ with st.sidebar:
     else:
         st.session_state.countdown = 0
     
-    st.divider()
-    if st.button("⚠️ 重置数据库（清空所有数据）", type="primary", use_container_width=True):
-        conn.close()
-        try:
-            os.remove("makuake.db")
-            st.success("数据库文件已删除，正在重新初始化...")
-            conn = init_db()
-            st.success("数据库已重置，请刷新页面")
-            st.rerun()
-        except FileNotFoundError:
-            st.info("数据库文件不存在，直接重新初始化")
-            conn = init_db()
-            st.rerun()
-        except Exception as e:
-            st.error(f"重置失败: {e}")
+    # 重置数据库按钮已删除，避免误操作
 
 # ================= 主界面 =================
 if selected_project is not None:
@@ -312,17 +299,19 @@ if selected_project is not None:
             today_amount_inc = None
             today_supporters_inc = None
 
-        # 最新记录
+        # 最新记录和上一条记录
         latest = history_df.iloc[0]
+        prev = history_df.iloc[1] if len(history_df) > 1 else latest
         
-        # 顶部指标：改为四列
+        # 顶部指标：四列，金额和支持者带 delta
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("当前筹得额 (円)", f"¥{latest['amount']:,}")
+            delta_amount = latest['amount'] - prev['amount']
+            st.metric("当前筹得额 (円)", f"¥{latest['amount']:,}", delta=f"{delta_amount:+,}")
         with col2:
-            st.metric("支持者人数", f"{latest['supporters']:,} 人")
+            delta_supporters = latest['supporters'] - prev['supporters']
+            st.metric("支持者人数", f"{latest['supporters']:,} 人", delta=f"{delta_supporters:+,}")
         with col3:
-            # 显示今天销售增量（仅金额）
             delta_display = f"{today_amount_inc:+,}" if today_amount_inc is not None else "暂无数据"
             st.metric("今日销售增量 (円)", delta_display)
         with col4:
@@ -397,7 +386,7 @@ if selected_project is not None:
                 secondary_y=False
             )
             
-            # 金额增量柱状图（添加customdata为支持者增量，用于hover）
+            # 金额增量柱状图（带支持者增量自定义数据，hover模板去掉时间）
             colors = ['#10b981' if val >= 0 else '#ef4444' for val in df_plot['金额增长']]
             bar_width = 1.0
             fig.add_trace(
@@ -408,9 +397,8 @@ if selected_project is not None:
                     marker=dict(color=colors, line=dict(width=1.5, color='#333')),
                     opacity=0.8,
                     width=bar_width,
-                    customdata=df_plot['支持者增长'],  # 添加支持者增量作为自定义数据
+                    customdata=df_plot['支持者增长'],
                     hovertemplate=
-                        "<b>时间</b>: %{x}<br>" +
                         "<b>金额增量</b>: %{y:+,d} 円<br>" +
                         "<b>支持者增量</b>: %{customdata:+,d} 人<br>" +
                         "<extra></extra>"
@@ -528,7 +516,6 @@ if st.session_state.auto_running and st.session_state.countdown > 0:
         st.rerun()
 
 # ================= 切换项目时触发滚动 =================
-# 在侧边栏项目选择后，设置滚动标记
 if st.session_state.get("selected_project") != selected_project:
     st.session_state.scroll_to_top = True
     st.session_state.selected_project = selected_project
