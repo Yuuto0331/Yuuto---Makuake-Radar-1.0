@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import re
-import os  # 新增：用于删除数据库文件
+import os
 
 # ================= Selenium 采集函数 =================
 from selenium import webdriver
@@ -159,6 +159,23 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ================= 受保护的数据库下载接口（无需密码） =================
+query_params = st.query_params
+if "download_db" in query_params:
+    try:
+        with open("makuake.db", "rb") as f:
+            db_data = f.read()
+        st.download_button(
+            label="点击下载数据库（如果未自动下载）",
+            data=db_data,
+            file_name="makuake.db",
+            mime="application/octet-stream"
+        )
+        st.stop()  # 停止渲染其他内容，只显示下载按钮
+    except FileNotFoundError:
+        st.error("数据库文件不存在")
+        st.stop()
+
 # ================= 侧边栏 =================
 with st.sidebar:
     st.title("⚙️ 控制中心")
@@ -237,7 +254,7 @@ with st.sidebar:
     else:
         st.session_state.countdown = 0
     
-    # ========== 新增：重置数据库按钮 ==========
+    # ========== 重置数据库按钮（可选） ==========
     st.divider()
     if st.button("⚠️ 重置数据库（清空所有数据）", type="primary", use_container_width=True):
         conn.close()
@@ -452,7 +469,7 @@ else:
     st.warning("请在左侧侧边栏添加您的第一个监控项目。")
 
 st.divider()
-st.caption("Yuuto - Makuake Radar 1.0 | 时区 Asia/Shanghai | 采集引擎：Selenium + ChromeDriver")
+st.caption("Yuuto - Makuake Radar 1.0 | 时区 Asia/Shanghai | 采集引擎：Selenium + ChromeDriver | 自动备份已集成")
 
 # ================= 定时采集逻辑 =================
 if st.session_state.auto_running and st.session_state.countdown > 0:
