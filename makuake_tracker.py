@@ -163,6 +163,8 @@ if "scroll_to_top" not in st.session_state:
     st.session_state.scroll_to_top = False
 if "selected_project_id" not in st.session_state:
     st.session_state.selected_project_id = None
+if "is_admin" not in st.session_state:
+    st.session_state.is_admin = False
 
 load_settings()
 
@@ -220,93 +222,113 @@ if "download_db" in query_params:
 
 # ================= 侧边栏 =================
 with st.sidebar:
-    st.title("⚙️ 控制中心")
-    
-    st.divider()
-    
-    with st.expander("➕ 添加新项目", expanded=True):
-        new_title = st.text_input("项目名称（自定义）")
-        new_url = st.text_input("Makuake 项目 URL")
-        
-        if st.button("开始监控", use_container_width=True):
-            if not new_title or not new_url:
-                st.warning("请填写项目名称和 URL")
-            elif "makuake.com/project/" not in new_url:
-                st.error("请输入有效的 Makuake 项目地址")
+    # ---------- 管理员验证 ----------
+    if not st.session_state.is_admin:
+        st.title("🔒 管理员验证")
+        password = st.text_input("请输入管理员密码", type="password")
+        if st.button("验证", use_container_width=True):
+            if password == st.secrets["admin_password"]:
+                st.session_state.is_admin = True
+                st.success("验证成功")
+                st.rerun()
             else:
-                c = conn.cursor()
-                try:
-                    c.execute("INSERT INTO projects (url, title, interval) VALUES (?, ?, ?)", 
-                              (new_url, new_title, st.session_state.global_interval))
-                    pid = c.lastrowid
-                    conn.commit()
-                    
-                    with st.spinner("正在采集初始数据..."):
-                        amount, supporters, err = get_makuake_data(new_url)
-                        if amount is not None:
-                            save_history(pid, amount, supporters)
-                            st.success(f"项目 {new_title} 添加成功，已采集初始数据")
-                            save_settings(auto_running=True, interval_seconds=3600)
-                            st.rerun()
-                        else:
-                            c.execute("DELETE FROM projects WHERE id = ?", (pid,))
-                            conn.commit()
-                            st.error(f"初始数据采集失败: {err}")
-                except sqlite3.IntegrityError:
-                    st.warning("该项目已在监控列表中")
+                st.error("密码错误")
+        st.divider()
+        st.info("您当前处于只读模式，无法进行操作。")
+        # 只读状态下隐藏所有操作，但项目列表仍可查看（删除按钮隐藏）
     
-    st.divider()
+    else:
+        # 已验证，显示完整控制中心
+        st.title("⚙️ 控制中心")
+        
+        st.divider()
+        
+        with st.expander("➕ 添加新项目", expanded=True):
+            new_title = st.text_input("项目名称（自定义）")
+            new_url = st.text_input("Makuake 项目 URL")
+            
+            if st.button("开始监控", use_container_width=True):
+                if not new_title or not new_url:
+                    st.warning("请填写项目名称和 URL")
+                elif "makuake.com/project/" not in new_url:
+                    st.error("请输入有效的 Makuake 项目地址")
+                else:
+                    c = conn.cursor()
+                    try:
+                        c.execute("INSERT INTO projects (url, title, interval) VALUES (?, ?, ?)", 
+                                  (new_url, new_title, st.session_state.global_interval))
+                        pid = c.lastrowid
+                        conn.commit()
+                        
+                        with st.spinner("正在采集初始数据..."):
+                            amount, supporters, err = get_makuake_data(new_url)
+                            if amount is not None:
+                                save_history(pid, amount, supporters)
+                                st.success(f"项目 {new_title} 添加成功，已采集初始数据")
+                                save_settings(auto_running=True, interval_seconds=3600)
+                                st.rerun()
+                            else:
+                                c.execute("DELETE FROM projects WHERE id = ?", (pid,))
+                                conn.commit()
+                                st.error(f"初始数据采集失败: {err}")
+                    except sqlite3.IntegrityError:
+                        st.warning("该项目已在监控列表中")
+        
+        st.divider()
+        
+        st.subheader("⏰ 定时采集")
+        interval_min = st.number_input(
+            "采集间隔 (分钟)",
+            min_value=1,
+            value=st.session_state.global_interval // 60,
+            step=1,
+            key="interval_input"
+        )
+        new_interval = interval_min * 60
+        if new_interval != st.session_state.global_interval:
+            save_settings(auto_running=st.session_state.auto_running, interval_seconds=new_interval)
+        
+        auto_run = st.checkbox("开启定时采集", value=st.session_state.auto_running, key="auto_checkbox")
+        if auto_run != st.session_state.auto_running:
+            save_settings(auto_running=auto_run, interval_seconds=st.session_state.global_interval)
+        
+        if st.session_state.auto_running:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("▶️ 启动", use_container_width=True):
+                    st.session_state.countdown = st.session_state.global_interval
+                    st.success("定时采集已启动")
+            with col2:
+                if st.button("⏹️ 停止", use_container_width=True):
+                    st.session_state.auto_running = False
+                    st.session_state.countdown = 0
+                    save_settings(auto_running=False, interval_seconds=st.session_state.global_interval)
+                    st.info("定时采集已停止")
+            
+            if st.session_state.countdown > 0:
+                st.info(f"⏳ 下次采集: {st.session_state.countdown} 秒")
+        else:
+            st.session_state.countdown = 0
+        
+        st.divider()
     
+    # ---------- 项目列表（始终显示，但删除按钮仅管理员可见） ----------
     st.subheader("📌 项目列表")
     projects_df = pd.read_sql("SELECT * FROM projects", conn)
     if not projects_df.empty:
         selected_title = st.selectbox("选择要查看的项目", projects_df['title'])
         selected_project = projects_df[projects_df['title'] == selected_title].iloc[0]
-        if st.button("🗑️ 删除当前项目", type="secondary"):
-            c = conn.cursor()
-            c.execute("DELETE FROM history WHERE project_id = ?", (int(selected_project['id']),))
-            c.execute("DELETE FROM projects WHERE id = ?", (int(selected_project['id']),))
-            conn.commit()
-            st.rerun()
+        # 仅管理员显示删除按钮
+        if st.session_state.is_admin:
+            if st.button("🗑️ 删除当前项目", type="secondary"):
+                c = conn.cursor()
+                c.execute("DELETE FROM history WHERE project_id = ?", (int(selected_project['id']),))
+                c.execute("DELETE FROM projects WHERE id = ?", (int(selected_project['id']),))
+                conn.commit()
+                st.rerun()
     else:
         st.info("暂无监控项目")
         selected_project = None
-    
-    st.divider()
-    
-    st.subheader("⏰ 定时采集")
-    interval_min = st.number_input(
-        "采集间隔 (分钟)",
-        min_value=1,
-        value=st.session_state.global_interval // 60,
-        step=1,
-        key="interval_input"
-    )
-    new_interval = interval_min * 60
-    if new_interval != st.session_state.global_interval:
-        save_settings(auto_running=st.session_state.auto_running, interval_seconds=new_interval)
-    
-    auto_run = st.checkbox("开启定时采集", value=st.session_state.auto_running, key="auto_checkbox")
-    if auto_run != st.session_state.auto_running:
-        save_settings(auto_running=auto_run, interval_seconds=st.session_state.global_interval)
-    
-    if st.session_state.auto_running:
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("▶️ 启动", use_container_width=True):
-                st.session_state.countdown = st.session_state.global_interval
-                st.success("定时采集已启动")
-        with col2:
-            if st.button("⏹️ 停止", use_container_width=True):
-                st.session_state.auto_running = False
-                st.session_state.countdown = 0
-                save_settings(auto_running=False, interval_seconds=st.session_state.global_interval)
-                st.info("定时采集已停止")
-        
-        if st.session_state.countdown > 0:
-            st.info(f"⏳ 下次采集: {st.session_state.countdown} 秒")
-    else:
-        st.session_state.countdown = 0
 
 # ================= 项目总览（所有项目对比） =================
 if not projects_df.empty:
@@ -318,7 +340,6 @@ if not projects_df.empty:
         for _, row in projects_df.iterrows():
             pid = row['id']
             title = row['title']
-            # 获取该项目的历史数据（按时间升序）
             hist = pd.read_sql(
                 f"SELECT amount, supporters, collected_at FROM history WHERE project_id = {pid} ORDER BY collected_at",
                 conn,
@@ -336,12 +357,10 @@ if not projects_df.empty:
                 })
                 continue
             
-            # 最新数据
             latest = hist.iloc[-1]
             total_amount = latest['amount']
             total_supporters = latest['supporters']
             
-            # 今日数据
             today_data = hist[hist['collected_at'].dt.date == today]
             if len(today_data) >= 2:
                 today_amount_inc = today_data['amount'].iloc[-1] - today_data['amount'].iloc[0]
@@ -353,7 +372,6 @@ if not projects_df.empty:
                 today_amount_inc = 0
                 today_supporters_inc = 0
             
-            # 昨日数据
             yesterday_data = hist[hist['collected_at'].dt.date == yesterday]
             if len(yesterday_data) >= 2:
                 yesterday_amount_inc = yesterday_data['amount'].iloc[-1] - yesterday_data['amount'].iloc[0]
@@ -376,7 +394,6 @@ if not projects_df.empty:
             })
         
         overview_df = pd.DataFrame(overview_data)
-        # 格式化显示
         st.dataframe(
             overview_df.style.format({
                 "总金额": "¥{:,.0f}",
