@@ -113,17 +113,13 @@ def init_db():
     conn = sqlite3.connect('makuake.db')
     c = conn.cursor()
     
-    # 项目表
     c.execute('''CREATE TABLE IF NOT EXISTS projects 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT UNIQUE, title TEXT, interval INTEGER)''')
-    # 历史表
     c.execute('''CREATE TABLE IF NOT EXISTS history 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, amount INTEGER, 
                   supporters INTEGER, collected_at TIMESTAMP, FOREIGN KEY(project_id) REFERENCES projects(id))''')
-    # 设置表（只有一行）
     c.execute('''CREATE TABLE IF NOT EXISTS settings 
                  (id INTEGER PRIMARY KEY CHECK (id = 1), auto_running INTEGER, interval_seconds INTEGER)''')
-    # 插入默认设置（如果表为空）
     c.execute("INSERT OR IGNORE INTO settings (id, auto_running, interval_seconds) VALUES (1, 0, 3600)")
     conn.commit()
     return conn
@@ -137,27 +133,22 @@ def save_history(project_id, amount, supporters):
     conn.commit()
 
 def load_settings():
-    """从数据库加载设置并更新 session_state"""
     c = conn.cursor()
     c.execute("SELECT auto_running, interval_seconds FROM settings WHERE id = 1")
     row = c.fetchone()
     if row:
         st.session_state.auto_running = bool(row[0])
         st.session_state.global_interval = row[1]
-        # 如果 auto_running 为 True 但 countdown 为 0，则启动倒计时
         if st.session_state.auto_running and st.session_state.countdown == 0:
             st.session_state.countdown = st.session_state.global_interval
 
 def save_settings(auto_running, interval_seconds):
-    """保存设置到数据库"""
     c = conn.cursor()
     c.execute("UPDATE settings SET auto_running = ?, interval_seconds = ? WHERE id = 1",
               (int(auto_running), interval_seconds))
     conn.commit()
-    # 更新 session_state
     st.session_state.auto_running = auto_running
     st.session_state.global_interval = interval_seconds
-    # 如果开启且倒计时为0，启动倒计时
     if auto_running and st.session_state.countdown == 0:
         st.session_state.countdown = interval_seconds
 
@@ -168,14 +159,11 @@ if "countdown" not in st.session_state:
     st.session_state.countdown = 0
 if "global_interval" not in st.session_state:
     st.session_state.global_interval = 3600
-# 用于页面滚动标记
 if "scroll_to_top" not in st.session_state:
     st.session_state.scroll_to_top = False
-# 用于记录当前选中的项目ID
 if "selected_project_id" not in st.session_state:
     st.session_state.selected_project_id = None
 
-# 从数据库加载设置
 load_settings()
 
 # ================= 页面配置 =================
@@ -236,7 +224,6 @@ with st.sidebar:
     
     st.divider()
     
-    # 添加新项目
     with st.expander("➕ 添加新项目", expanded=True):
         new_title = st.text_input("项目名称（自定义）")
         new_url = st.text_input("Makuake 项目 URL")
@@ -259,7 +246,6 @@ with st.sidebar:
                         if amount is not None:
                             save_history(pid, amount, supporters)
                             st.success(f"项目 {new_title} 添加成功，已采集初始数据")
-                            # 添加项目后，默认开启自动采集，间隔设为60分钟
                             save_settings(auto_running=True, interval_seconds=3600)
                             st.rerun()
                         else:
@@ -289,8 +275,6 @@ with st.sidebar:
     st.divider()
     
     st.subheader("⏰ 定时采集")
-    
-    # 间隔输入（分钟）
     interval_min = st.number_input(
         "采集间隔 (分钟)",
         min_value=1,
@@ -299,19 +283,13 @@ with st.sidebar:
         key="interval_input"
     )
     new_interval = interval_min * 60
-    
-    # 如果间隔变化，保存设置
     if new_interval != st.session_state.global_interval:
         save_settings(auto_running=st.session_state.auto_running, interval_seconds=new_interval)
     
-    # 自动采集复选框
     auto_run = st.checkbox("开启定时采集", value=st.session_state.auto_running, key="auto_checkbox")
-    
-    # 如果复选框状态变化，保存设置
     if auto_run != st.session_state.auto_running:
         save_settings(auto_running=auto_run, interval_seconds=st.session_state.global_interval)
     
-    # 启动/停止按钮（仅在开启定时采集时显示）
     if st.session_state.auto_running:
         col1, col2 = st.columns(2)
         with col1:
@@ -322,7 +300,6 @@ with st.sidebar:
             if st.button("⏹️ 停止", use_container_width=True):
                 st.session_state.auto_running = False
                 st.session_state.countdown = 0
-                # 更新数据库
                 save_settings(auto_running=False, interval_seconds=st.session_state.global_interval)
                 st.info("定时采集已停止")
         
@@ -331,12 +308,93 @@ with st.sidebar:
     else:
         st.session_state.countdown = 0
 
+# ================= 项目总览（所有项目对比） =================
+if not projects_df.empty:
+    with st.expander("📋 项目总览（点击展开对比）", expanded=False):
+        overview_data = []
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        yesterday = today - timedelta(days=1)
+        
+        for _, row in projects_df.iterrows():
+            pid = row['id']
+            title = row['title']
+            # 获取该项目的历史数据（按时间升序）
+            hist = pd.read_sql(
+                f"SELECT amount, supporters, collected_at FROM history WHERE project_id = {pid} ORDER BY collected_at",
+                conn,
+                parse_dates=['collected_at']
+            )
+            if hist.empty:
+                overview_data.append({
+                    "项目名称": title,
+                    "总金额": 0,
+                    "总支持者": 0,
+                    "今日金额增量": 0,
+                    "今日支持者增量": 0,
+                    "昨日金额增量": 0,
+                    "昨日支持者增量": 0
+                })
+                continue
+            
+            # 最新数据
+            latest = hist.iloc[-1]
+            total_amount = latest['amount']
+            total_supporters = latest['supporters']
+            
+            # 今日数据
+            today_data = hist[hist['collected_at'].dt.date == today]
+            if len(today_data) >= 2:
+                today_amount_inc = today_data['amount'].iloc[-1] - today_data['amount'].iloc[0]
+                today_supporters_inc = today_data['supporters'].iloc[-1] - today_data['supporters'].iloc[0]
+            elif len(today_data) == 1:
+                today_amount_inc = 0
+                today_supporters_inc = 0
+            else:
+                today_amount_inc = 0
+                today_supporters_inc = 0
+            
+            # 昨日数据
+            yesterday_data = hist[hist['collected_at'].dt.date == yesterday]
+            if len(yesterday_data) >= 2:
+                yesterday_amount_inc = yesterday_data['amount'].iloc[-1] - yesterday_data['amount'].iloc[0]
+                yesterday_supporters_inc = yesterday_data['supporters'].iloc[-1] - yesterday_data['supporters'].iloc[0]
+            elif len(yesterday_data) == 1:
+                yesterday_amount_inc = 0
+                yesterday_supporters_inc = 0
+            else:
+                yesterday_amount_inc = 0
+                yesterday_supporters_inc = 0
+            
+            overview_data.append({
+                "项目名称": title,
+                "总金额": total_amount,
+                "总支持者": total_supporters,
+                "今日金额增量": today_amount_inc,
+                "今日支持者增量": today_supporters_inc,
+                "昨日金额增量": yesterday_amount_inc,
+                "昨日支持者增量": yesterday_supporters_inc
+            })
+        
+        overview_df = pd.DataFrame(overview_data)
+        # 格式化显示
+        st.dataframe(
+            overview_df.style.format({
+                "总金额": "¥{:,.0f}",
+                "总支持者": "{:,.0f}",
+                "今日金额增量": "{:+,.0f}",
+                "今日支持者增量": "{:+,.0f}",
+                "昨日金额增量": "{:+,.0f}",
+                "昨日支持者增量": "{:+,.0f}"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
 # ================= 主界面 =================
 if selected_project is not None:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
 
-    # 读取历史数据
     history_df = pd.read_sql(
         f"SELECT * FROM history WHERE project_id = {selected_project['id']} ORDER BY collected_at DESC", 
         conn, 
@@ -344,7 +402,6 @@ if selected_project is not None:
     )
     
     if not history_df.empty:
-        # ---------- 计算当天增量 ----------
         today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
         today_data = history_df[history_df['collected_at'].dt.date == today].sort_values('collected_at')
         if len(today_data) >= 2:
@@ -357,11 +414,9 @@ if selected_project is not None:
             today_amount_inc = None
             today_supporters_inc = None
 
-        # 最新记录和上一条记录
         latest = history_df.iloc[0]
         prev = history_df.iloc[1] if len(history_df) > 1 else latest
         
-        # 顶部指标：四列，金额和支持者带 delta
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             delta_amount = latest['amount'] - prev['amount']
@@ -431,7 +486,6 @@ if selected_project is not None:
             
             fig = make_subplots(specs=[[{"secondary_y": True}]])
             
-            # 金额折线图
             fig.add_trace(
                 go.Scatter(
                     x=df_plot['collected_at'],
@@ -444,7 +498,6 @@ if selected_project is not None:
                 secondary_y=False
             )
             
-            # 金额增量柱状图（带支持者增量自定义数据，hover模板去掉时间）
             colors = ['#10b981' if val >= 0 else '#ef4444' for val in df_plot['金额增长']]
             bar_width = 1.0
             fig.add_trace(
@@ -505,7 +558,6 @@ if selected_project is not None:
                     else:
                         st.error(f"采集失败: {err}")
 
-        # 表格数据
         df_display = history_df.sort_values('collected_at').copy()
         df_display['金额增长'] = df_display['amount'].diff().fillna(0).astype(int)
         df_display['支持者增长'] = df_display['supporters'].diff().fillna(0).astype(int)
