@@ -108,15 +108,23 @@ def get_makuake_data(project_url):
     except Exception as e:
         return None, None, str(e)
 
-# ================= 数据库初始化 =================
+# ================= 数据库初始化（含设置表） =================
 def init_db():
     conn = sqlite3.connect('makuake.db')
     c = conn.cursor()
+    
+    # 项目表
     c.execute('''CREATE TABLE IF NOT EXISTS projects 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT UNIQUE, title TEXT, interval INTEGER)''')
+    # 历史表
     c.execute('''CREATE TABLE IF NOT EXISTS history 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, amount INTEGER, 
                   supporters INTEGER, collected_at TIMESTAMP, FOREIGN KEY(project_id) REFERENCES projects(id))''')
+    # 设置表（只有一行）
+    c.execute('''CREATE TABLE IF NOT EXISTS settings 
+                 (id INTEGER PRIMARY KEY CHECK (id = 1), auto_running INTEGER, interval_seconds INTEGER)''')
+    # 插入默认设置（如果表为空）
+    c.execute("INSERT OR IGNORE INTO settings (id, auto_running, interval_seconds) VALUES (1, 0, 3600)")
     conn.commit()
     return conn
 
@@ -127,6 +135,31 @@ def save_history(project_id, amount, supporters):
     c.execute("INSERT INTO history (project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?)",
               (project_id, amount, supporters, datetime.now(ZoneInfo("Asia/Shanghai"))))
     conn.commit()
+
+def load_settings():
+    """从数据库加载设置并更新 session_state"""
+    c = conn.cursor()
+    c.execute("SELECT auto_running, interval_seconds FROM settings WHERE id = 1")
+    row = c.fetchone()
+    if row:
+        st.session_state.auto_running = bool(row[0])
+        st.session_state.global_interval = row[1]
+        # 如果 auto_running 为 True 但 countdown 为 0，则启动倒计时
+        if st.session_state.auto_running and st.session_state.countdown == 0:
+            st.session_state.countdown = st.session_state.global_interval
+
+def save_settings(auto_running, interval_seconds):
+    """保存设置到数据库"""
+    c = conn.cursor()
+    c.execute("UPDATE settings SET auto_running = ?, interval_seconds = ? WHERE id = 1",
+              (int(auto_running), interval_seconds))
+    conn.commit()
+    # 更新 session_state
+    st.session_state.auto_running = auto_running
+    st.session_state.global_interval = interval_seconds
+    # 如果开启且倒计时为0，启动倒计时
+    if auto_running and st.session_state.countdown == 0:
+        st.session_state.countdown = interval_seconds
 
 # ================= 会话状态初始化 =================
 if "auto_running" not in st.session_state:
@@ -141,6 +174,9 @@ if "scroll_to_top" not in st.session_state:
 # 用于记录当前选中的项目ID
 if "selected_project_id" not in st.session_state:
     st.session_state.selected_project_id = None
+
+# 从数据库加载设置
+load_settings()
 
 # ================= 页面配置 =================
 st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
@@ -175,7 +211,7 @@ if st.session_state.scroll_to_top:
         """,
         height=0,
     )
-    st.session_state.scroll_to_top = False  # 重置标记
+    st.session_state.scroll_to_top = False
 
 # ================= 数据库下载接口（无密码） =================
 query_params = st.query_params
@@ -200,7 +236,7 @@ with st.sidebar:
     
     st.divider()
     
-    # 将添加新项目放入可折叠展开器，节省空间
+    # 添加新项目
     with st.expander("➕ 添加新项目", expanded=True):
         new_title = st.text_input("项目名称（自定义）")
         new_url = st.text_input("Makuake 项目 URL")
@@ -223,6 +259,8 @@ with st.sidebar:
                         if amount is not None:
                             save_history(pid, amount, supporters)
                             st.success(f"项目 {new_title} 添加成功，已采集初始数据")
+                            # 添加项目后，默认开启自动采集，间隔设为60分钟
+                            save_settings(auto_running=True, interval_seconds=3600)
                             st.rerun()
                         else:
                             c.execute("DELETE FROM projects WHERE id = ?", (pid,))
@@ -251,12 +289,29 @@ with st.sidebar:
     st.divider()
     
     st.subheader("⏰ 定时采集")
-    interval_min = st.number_input("采集间隔 (分钟)", min_value=1, value=st.session_state.global_interval // 60, step=1)
-    st.session_state.global_interval = interval_min * 60
     
-    auto_run = st.checkbox("开启定时采集", value=st.session_state.auto_running)
-    st.session_state.auto_running = auto_run
+    # 间隔输入（分钟）
+    interval_min = st.number_input(
+        "采集间隔 (分钟)",
+        min_value=1,
+        value=st.session_state.global_interval // 60,
+        step=1,
+        key="interval_input"
+    )
+    new_interval = interval_min * 60
     
+    # 如果间隔变化，保存设置
+    if new_interval != st.session_state.global_interval:
+        save_settings(auto_running=st.session_state.auto_running, interval_seconds=new_interval)
+    
+    # 自动采集复选框
+    auto_run = st.checkbox("开启定时采集", value=st.session_state.auto_running, key="auto_checkbox")
+    
+    # 如果复选框状态变化，保存设置
+    if auto_run != st.session_state.auto_running:
+        save_settings(auto_running=auto_run, interval_seconds=st.session_state.global_interval)
+    
+    # 启动/停止按钮（仅在开启定时采集时显示）
     if st.session_state.auto_running:
         col1, col2 = st.columns(2)
         with col1:
@@ -267,6 +322,8 @@ with st.sidebar:
             if st.button("⏹️ 停止", use_container_width=True):
                 st.session_state.auto_running = False
                 st.session_state.countdown = 0
+                # 更新数据库
+                save_settings(auto_running=False, interval_seconds=st.session_state.global_interval)
                 st.info("定时采集已停止")
         
         if st.session_state.countdown > 0:
