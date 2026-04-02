@@ -42,8 +42,9 @@ def get_makuake_data(project_url):
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         driver.get(project_url)
+        # 修复：正确方法名 presence_of_element_located
         WebDriverWait(driver, 15).until(
-            EC.presence_element_located((By.TAG_NAME, "body"))
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
         time.sleep(3)
 
