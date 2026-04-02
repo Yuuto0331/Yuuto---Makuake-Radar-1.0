@@ -43,7 +43,7 @@ def get_makuake_data(project_url):
         
         driver.get(project_url)
         WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
+            EC.presence_element_located((By.TAG_NAME, "body"))
         )
         time.sleep(3)
 
@@ -245,10 +245,8 @@ with st.sidebar:
                 st.error("密码错误")
         st.divider()
         st.info("您当前处于只读模式，无法进行操作。")
-        # 只读状态下隐藏所有操作，但项目列表仍可查看（删除按钮隐藏）
     
     else:
-        # 已验证，显示完整控制中心
         st.title("⚙️ 控制中心")
         
         st.divider()
@@ -322,13 +320,12 @@ with st.sidebar:
         
         st.divider()
     
-    # ---------- 项目列表（始终显示，但删除按钮仅管理员可见） ----------
+    # ---------- 项目列表 ----------
     st.subheader("📌 项目列表")
     projects_df = pd.read_sql("SELECT * FROM projects", conn)
     if not projects_df.empty:
         selected_title = st.selectbox("选择要查看的项目", projects_df['title'])
         selected_project = projects_df[projects_df['title'] == selected_title].iloc[0]
-        # 仅管理员显示删除按钮
         if st.session_state.is_admin:
             if st.button("🗑️ 删除当前项目", type="secondary"):
                 c = conn.cursor()
@@ -340,7 +337,7 @@ with st.sidebar:
         st.info("暂无监控项目")
         selected_project = None
 
-# ================= 项目总览（所有项目对比） =================
+# ================= 项目总览 =================
 if not projects_df.empty:
     with st.expander("📋 项目总览（点击展开对比）", expanded=False):
         overview_data = []
