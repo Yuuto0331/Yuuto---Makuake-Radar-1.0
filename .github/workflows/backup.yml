@@ -1,34 +1,102 @@
+# ==================================================
+# GitHub Actions 自动备份配置 - 保留所有备份 + 按项目拆分
+# 无需修改任何内容，仅需提前配置 STREAMLIT_APP_URL 密钥
+# ==================================================
 name: Backup Streamlit Database
 
+# 触发规则：每天10点（北京时间）自动备份 + 手动触发
 on:
   schedule:
-    - cron: '0 2 * * *'   # 每天凌晨2点执行备份
-  workflow_dispatch:       # 允许手动触发
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+# 核心权限：允许推送文件到仓库
+permissions:
+  contents: write
 
 jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      # 1. 拉取仓库代码
+      - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
-      - name: Download database
+      # 2. 安装Python环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas sqlite3 requests
+
+      # 4. 下载数据库并按项目拆分
+      - name: Download and split database
         env:
           APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
         run: |
-          # 创建备份目录
-          mkdir -p backups
-          # 生成带日期的文件名
+          # 创建备份目录（按日期命名）
           DATE=$(date +'%Y%m%d_%H%M%S')
-          FILENAME="backups/makuake_${DATE}.db"
-          # 下载数据库文件（直接访问下载接口）
-          curl -L -o "$FILENAME" "${APP_URL}?download_db=1"
-          echo "✅ 数据库已备份到 $FILENAME"
+          BACKUP_DIR="backups/backup_${DATE}"
+          mkdir -p "$BACKUP_DIR"
+          
+          # 下载完整数据库
+          FULL_DB="${BACKUP_DIR}/makuake_full_${DATE}.db"
+          curl -L -o "$FULL_DB" "${APP_URL}?download_db=1"
+          echo "✅ 完整数据库下载完成"
+          
+          # 按项目拆分备份
+          python -c "
+          import sqlite3
+          import pandas as pd
+          import os
 
-      - name: Commit and push backup
+          # 连接数据库
+          conn = sqlite3.connect('$FULL_DB')
+          
+          # 读取项目列表
+          projects_df = pd.read_sql('SELECT * FROM projects', conn)
+          if not projects_df.empty:
+              for _, proj in projects_df.iterrows():
+                  # 处理项目名称特殊字符
+                  proj_id = proj['id']
+                  proj_name = str(proj.get('title', f'proj_{proj_id}')).replace('/', '_').replace(' ', '_')
+                  
+                  # 读取项目数据
+                  hist_df = pd.read_sql(f'SELECT * FROM history WHERE project_id = {proj_id}', conn)
+                  
+                  # 保存项目备份
+                  proj_file = f'$BACKUP_DIR/project_{proj_id}_{proj_name}_{DATE}.csv'
+                  hist_df.to_csv(proj_file, index=False, encoding='utf-8-sig')
+                  print(f'✅ 项目 {proj_name} 备份完成')
+          else:
+              print('⚠️ 暂无项目数据')
+          
+          conn.close()
+          "
+
+      # 5. 推送备份到仓库
+      - name: Push backup to GitHub
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          # 配置Git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 添加备份文件
           git add backups/
-          git diff --quiet && git diff --staged --quiet || git commit -m "Daily database backup"
-          git push
+          
+          # 无变更则跳过
+          if git diff --cached --quiet; then
+            echo "无新备份，跳过提交"
+            exit 0
+          fi
+          
+          # 提交并推送
+          git commit -m "Auto backup ${DATE}"
+          git push origin main
