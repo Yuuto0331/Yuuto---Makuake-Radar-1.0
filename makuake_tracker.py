@@ -15,7 +15,7 @@ import base64
 
 # 配置（仅改这2处）
 DB_FILE = "makuake.db"  # 固定值，不用改
-GITHUB_REPO = "你的GitHub用户名/你的仓库名"  # 【必填】比如 "zhangsan/makuake-backup"
+GITHUB_REPO = "Yuuto0331/Yuuto---Makuake-Radar-1.0"  # 【必填】比如 "zhangsan/makuake-backup"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # 【可选】私有仓库填token，公开仓库留空
 
 def auto_restore_from_github():
