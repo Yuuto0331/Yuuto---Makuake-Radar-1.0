@@ -1,11 +1,11 @@
 name: Backup Makuake Database
 on:
   schedule:
-    - cron: '0 2 * * *'
-  workflow_dispatch:
+    - cron: '0 2 * * *'  # 北京时间10点自动备份
+  workflow_dispatch:     # 允许手动触发
 
 permissions:
-  contents: write
+  contents: write        # 赋予推送代码的权限
 
 jobs:
   backup:
@@ -22,17 +22,18 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install pandas requests  # 移除了sqlite3（内置库）
+          pip install pandas requests  # 仅安装需要的依赖（sqlite3是内置的，无需安装）
 
       - name: Download and backup database
         env:
+          # 替换成你的Streamlit应用地址（末尾带/）
           APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
         run: |
           DATE=$(date +'%Y%m%d_%H%M%S')
           BACKUP_DIR="backups/backup_${DATE}"
           mkdir -p "$BACKUP_DIR"
           
-          # 下载数据库
+          # 调用应用的下载接口获取数据库
           FULL_DB="${BACKUP_DIR}/makuake_full_${DATE}.db"
           curl -L --max-time 60 -o "$FULL_DB" "${APP_URL}?download_db=1"
           
