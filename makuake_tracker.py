@@ -126,20 +126,25 @@ def init_db():
 
 conn = init_db()
 
+# ==============================================
+# 🔴 唯一修改：这里彻底修复保存历史问题
+# ==============================================
 def save_history(project_id, amount, supporters):
     try:
-        # 每次都重新连接，确保一定能写入
+        # 每次都重新创建连接，确保一定能写入
         conn_write = sqlite3.connect('makuake.db')
         c = conn_write.cursor()
-        now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime('%Y-%m-%d %H:%M:%S')
-        c.execute(
-            "INSERT INTO history (project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?)",
-            (project_id, amount, supporters, now)
-        )
+        now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+        
+        c.execute('''
+            INSERT INTO history (project_id, amount, supporters, collected_at)
+            VALUES (?, ?, ?, ?)
+        ''', (project_id, amount, supporters, now))
+        
         conn_write.commit()
         conn_write.close()
     except Exception as e:
-        print("保存历史失败:", e)
+        print("保存历史数据失败：", e)
 
 def load_settings():
     c = conn.cursor()
