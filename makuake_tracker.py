@@ -9,7 +9,75 @@ from plotly.subplots import make_subplots
 import re
 import os
 
-# ================= Selenium 采集函数 =================
+# ================= 新增：自动恢复备份核心函数（仅新增，不修改原有代码） =================
+import requests
+import base64
+
+# 配置（仅改这2处）
+DB_FILE = "makuake.db"  # 固定值，不用改
+GITHUB_REPO = "你的GitHub用户名/你的仓库名"  # 【必填】比如 "zhangsan/makuake-backup"
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # 【可选】私有仓库填token，公开仓库留空
+
+def auto_restore_from_github():
+    """启动时自动检查数据库，异常则从GitHub恢复最新备份"""
+    # 1. 检查数据库是否健康
+    def is_db_healthy():
+        if not os.path.exists(DB_FILE):
+            return False
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            conn.execute("SELECT 1 FROM projects LIMIT 1")
+            conn.close()
+            return True
+        except:
+            return False
+
+    # 2. 数据库正常则跳过
+    if is_db_healthy():
+        st.toast("✅ 本地数据库正常", icon="✅")
+        return
+
+    st.toast("⚠️ 数据库异常，正在恢复最新备份...", icon="⚠️")
+
+    # 3. 从GitHub下载最新备份
+    try:
+        # 调用GitHub API
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/backups"
+        headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+        
+        # 获取备份目录
+        res = requests.get(url, headers=headers, timeout=30)
+        res.raise_for_status()
+        backups = res.json()
+
+        # 筛选最新备份目录
+        backup_dirs = [b for b in backups if b["type"] == "dir"]
+        if not backup_dirs:
+            st.error("❌ 无备份文件！")
+            return
+        latest_dir = sorted(backup_dirs, key=lambda x: x["name"], reverse=True)[0]
+
+        # 获取完整数据库文件
+        files_res = requests.get(latest_dir["url"], headers=headers, timeout=30)
+        files_res.raise_for_status()
+        db_files = [f for f in files_res.json() if f["name"].startswith("makuake_full_") and f["name"].endswith(".db")]
+        
+        if not db_files:
+            st.error("❌ 无完整备份文件！")
+            return
+
+        # 下载并写入数据库
+        db_url = db_files[0]["download_url"]
+        db_data = requests.get(db_url, headers=headers, timeout=30).content
+        with open(DB_FILE, "wb") as f:
+            f.write(db_data)
+
+        st.success("✅ 备份恢复成功！", icon="✅")
+
+    except Exception as e:
+        st.error(f"❌ 恢复失败：{str(e)}", icon="❌")
+
+# ================= Selenium 采集函数（完全保留你的原有代码） =================
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -108,7 +176,7 @@ def get_makuake_data(project_url):
     except Exception as e:
         return None, None, str(e)
 
-# ================= 数据库初始化（含设置表） =================
+# ================= 数据库初始化（含设置表）（完全保留你的原有代码） =================
 def init_db():
     conn = sqlite3.connect('makuake.db')
     c = conn.cursor()
@@ -125,6 +193,9 @@ def init_db():
     return conn
 
 conn = init_db()
+
+# ================= 新增：启动时执行自动恢复（仅新增，不修改原有代码） =================
+auto_restore_from_github()
 
 def save_history(project_id, amount, supporters):
     c = conn.cursor()
@@ -152,7 +223,7 @@ def save_settings(auto_running, interval_seconds):
     if auto_running and st.session_state.countdown == 0:
         st.session_state.countdown = interval_seconds
 
-# ================= 会话状态初始化 =================
+# ================= 会话状态初始化（完全保留你的原有代码） =================
 if "auto_running" not in st.session_state:
     st.session_state.auto_running = False
 if "countdown" not in st.session_state:
@@ -168,10 +239,10 @@ if "is_admin" not in st.session_state:
 
 load_settings()
 
-# ================= 页面配置 =================
+# ================= 页面配置（完全保留你的原有代码） =================
 st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
 
-# ================= 应用页头 =================
+# ================= 应用页头（完全保留你的原有代码） =================
 st.markdown("""
 <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 0; color: white; text-align: center; margin-bottom: 1rem;">
     <h1 style="margin:0; font-size: 1.8rem;">Yuuto - Makuake Radar 1.0</h1>
@@ -179,7 +250,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ================= 添加自定义CSS使表格居中对齐 =================
+# ================= 添加自定义CSS使表格居中对齐（完全保留你的原有代码） =================
 st.markdown("""
 <style>
     .stDataFrame table td {
@@ -191,7 +262,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 自动滚动到顶部的逻辑 =================
+# ================= 自动滚动到顶部的逻辑（完全保留你的原有代码） =================
 if st.session_state.scroll_to_top:
     st.components.v1.html(
         """
@@ -203,7 +274,7 @@ if st.session_state.scroll_to_top:
     )
     st.session_state.scroll_to_top = False
 
-# ================= 数据库下载接口（无密码） =================
+# ================= 数据库下载接口（无密码）（完全保留你的原有代码） =================
 query_params = st.query_params
 if "download_db" in query_params:
     try:
@@ -220,7 +291,7 @@ if "download_db" in query_params:
         st.error("数据库文件不存在")
         st.stop()
 
-# ================= 侧边栏 =================
+# ================= 侧边栏（完全保留你的原有代码） =================
 with st.sidebar:
     # ---------- 管理员验证 ----------
     if not st.session_state.is_admin:
@@ -330,7 +401,7 @@ with st.sidebar:
         st.info("暂无监控项目")
         selected_project = None
 
-# ================= 项目总览（所有项目对比） =================
+# ================= 项目总览（所有项目对比）（完全保留你的原有代码） =================
 if not projects_df.empty:
     with st.expander("📋 项目总览（点击展开对比）", expanded=False):
         overview_data = []
@@ -407,7 +478,7 @@ if not projects_df.empty:
             hide_index=True
         )
 
-# ================= 主界面 =================
+# ================= 主界面（完全保留你的原有代码） =================
 if selected_project is not None:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
@@ -626,7 +697,7 @@ else:
 st.divider()
 st.caption("Yuuto - Makuake Radar 1.0 | 时区 Asia/Shanghai | 采集引擎：Selenium + ChromeDriver | 自动备份已集成")
 
-# ================= 定时采集逻辑 =================
+# ================= 定时采集逻辑（完全保留你的原有代码） =================
 if st.session_state.auto_running and st.session_state.countdown > 0:
     time.sleep(1)
     st.session_state.countdown -= 1
@@ -642,7 +713,7 @@ if st.session_state.auto_running and st.session_state.countdown > 0:
     else:
         st.rerun()
 
-# ================= 切换项目时触发滚动 =================
+# ================= 切换项目时触发滚动（完全保留你的原有代码） =================
 if selected_project is not None:
     current_id = selected_project['id']
     if st.session_state.get("selected_project_id") != current_id:
