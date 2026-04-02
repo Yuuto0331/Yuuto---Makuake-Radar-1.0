@@ -4,92 +4,29 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
-# 关键：给 Actions 足够的权限
 permissions:
   contents: write
-  actions: read
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-    # 关键：解决 Node.js 20 警告，直接用 Node 24
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install pandas requests
-
-      - name: Download database with retry
+      - name: Download DB
         env:
           APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
         run: |
-          set -e
-          DATE=$(date +'%Y%m%d_%H%M%S')
-          BACKUP_DIR="backups/backup_${DATE}"
-          mkdir -p "$BACKUP_DIR"
-          FULL_DB="${BACKUP_DIR}/makuake_full_${DATE}.db"
+          DATE=$(date +%Y%m%d_%H%M%S)
+          mkdir -p backups/backup_$DATE
+          curl -L --retry 3 -o backups/backup_$DATE/makuake_full_$DATE.db "$APP_URL?download_db=1"
 
-          echo "开始下载数据库，APP_URL: $APP_URL"
-          # 关键：增加重试、超时、完整重定向处理
-          curl -L --retry 3 --retry-delay 5 --max-time 120 \
-            -o "$FULL_DB" \
-            -A "Makuake-Backup/1.0" \
-            "${APP_URL}?download_db=1"
-
-          # 验证文件是否下载成功
-          if [ ! -s "$FULL_DB" ]; then
-            echo "❌ 数据库文件为空，下载失败"
-            exit 1
-          fi
-          echo "✅ 数据库下载成功，大小: $(du -h $FULL_DB)"
-
-      - name: Split database to CSV (可选，不影响备份)
+      - name: Push
         run: |
-          DATE=$(date +'%Y%m%d_%H%M%S')
-          BACKUP_DIR="backups/backup_${DATE}"
-          FULL_DB="${BACKUP_DIR}/makuake_full_${DATE}.db"
-
-          python -c "
-          import sqlite3
-          import pandas as pd
-          import os
-
-          conn = sqlite3.connect('$FULL_DB')
-          projects_df = pd.read_sql('SELECT id, title FROM projects', conn)
-
-          if not projects_df.empty:
-              for _, proj in projects_df.iterrows():
-                  proj_id = proj['id']
-                  proj_name = str(proj.get('title', f'proj_{proj_id}')).replace('/', '_').replace(' ', '_')
-                  hist_df = pd.read_sql(f'SELECT * FROM history WHERE project_id = {proj_id}', conn)
-                  proj_file = f'$BACKUP_DIR/project_{proj_id}_{proj_name}_{DATE}.csv'
-                  hist_df.to_csv(proj_file, index=False, encoding='utf-8-sig')
-                  print(f'✅ 项目 {proj_name} 备份完成')
-          else:
-              print('⚠️ 暂无项目数据')
-          conn.close()
-          "
-
-      - name: Push backup to GitHub
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
+          git config --global user.name "actions"
+          git config --global user.email "actions@github.com"
           git add backups/
-          if git diff --cached --quiet; then
-            echo "无新备份，跳过提交"
-            exit 0
-          fi
-          
-          git commit -m "Auto backup ${DATE}"
-          git push origin main
+          git commit -m "Backup $DATE"
+          git push
