@@ -8,71 +8,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import re
 import os
-# 新增：备份恢复所需依赖
-import base64
-import requests
 
-# ================= 新增：自动备份恢复配置（不影响原有功能） =================
-DB_FILE = "makuake.db"
-GITHUB_REPO = "Yuuto0331/Yuuto---Makuake-Radar-1.0"  # 你的仓库地址
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # 私有仓库需配置，公开仓库留空
-
-# ================= 新增：自动恢复备份函数（独立函数，不干扰原有逻辑） =================
-def auto_restore_from_github():
-    """启动时自动检查并恢复GitHub备份（仅数据库丢失/损坏时触发）"""
-    # 检查数据库是否健康
-    def is_db_healthy():
-        if not os.path.exists(DB_FILE):
-            return False
-        try:
-            conn = sqlite3.connect(DB_FILE)
-            conn.execute("SELECT 1 FROM projects LIMIT 1")
-            conn.close()
-            return True
-        except Exception as e:
-            st.warning(f"数据库损坏，尝试恢复备份：{str(e)}")
-            return False
-
-    # 数据库正常则跳过恢复
-    if is_db_healthy():
-        return
-
-    st.toast("⚠️ 检测到数据库丢失/损坏，正在从GitHub恢复备份...", icon="⚠️")
-    try:
-        # 1. 获取backups文件夹下的所有备份目录
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/backups"
-        headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
-        
-        res = requests.get(url, headers=headers, timeout=30)
-        res.raise_for_status()
-        backups = res.json()
-
-        # 筛选出备份目录并按时间排序（最新的在前）
-        backup_dirs = [b for b in backups if b["type"] == "dir"]
-        if not backup_dirs:
-            st.error("❌ GitHub仓库中未找到备份文件夹！")
-            return
-        latest_dir = sorted(backup_dirs, key=lambda x: x["name"], reverse=True)[0]
-
-        # 2. 获取最新备份目录下的数据库文件
-        files_res = requests.get(latest_dir["url"], headers=headers, timeout=30)
-        files_res.raise_for_status()
-        db_files = [f for f in files_res.json() if f["name"].startswith("makuake_full_") and f["name"].endswith(".db")]
-        
-        if not db_files:
-            st.error("❌ 最新备份中未找到数据库文件！")
-            return
-
-        # 3. 下载并恢复数据库
-        db_data = requests.get(db_files[0]["download_url"], headers=headers, timeout=30).content
-        with open(DB_FILE, "wb") as f:
-            f.write(db_data)
-
-        st.success("✅ 数据库备份恢复成功！", icon="✅")
-    except Exception as e:
-        st.error(f"❌ 备份恢复失败：{str(e)}", icon="❌")
-
-# ================= Selenium 采集函数（原始代码，未改动） =================
+# ================= Selenium 采集函数 =================
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -171,7 +108,7 @@ def get_makuake_data(project_url):
     except Exception as e:
         return None, None, str(e)
 
-# ================= 数据库初始化（含设置表）（原始代码，仅新增一行恢复调用） =================
+# ================= 数据库初始化（含设置表） =================
 def init_db():
     conn = sqlite3.connect('makuake.db')
     c = conn.cursor()
@@ -188,8 +125,6 @@ def init_db():
     return conn
 
 conn = init_db()
-# 新增：启动时自动恢复备份（仅这一行新增，不影响原有逻辑）
-auto_restore_from_github()
 
 def save_history(project_id, amount, supporters):
     c = conn.cursor()
@@ -217,7 +152,7 @@ def save_settings(auto_running, interval_seconds):
     if auto_running and st.session_state.countdown == 0:
         st.session_state.countdown = interval_seconds
 
-# ================= 会话状态初始化（原始代码，未改动） =================
+# ================= 会话状态初始化 =================
 if "auto_running" not in st.session_state:
     st.session_state.auto_running = False
 if "countdown" not in st.session_state:
@@ -233,10 +168,10 @@ if "is_admin" not in st.session_state:
 
 load_settings()
 
-# ================= 页面配置（原始代码，未改动） =================
+# ================= 页面配置 =================
 st.set_page_config(page_title="Yuuto - Makuake Radar 1.0", layout="wide")
 
-# ================= 应用页头（原始代码，未改动） =================
+# ================= 应用页头 =================
 st.markdown("""
 <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 0; color: white; text-align: center; margin-bottom: 1rem;">
     <h1 style="margin:0; font-size: 1.8rem;">Yuuto - Makuake Radar 1.0</h1>
@@ -244,7 +179,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ================= 添加自定义CSS使表格居中对齐（原始代码，未改动） =================
+# ================= 添加自定义CSS使表格居中对齐 =================
 st.markdown("""
 <style>
     .stDataFrame table td {
@@ -256,7 +191,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 自动滚动到顶部的逻辑（原始代码，未改动） =================
+# ================= 自动滚动到顶部的逻辑 =================
 if st.session_state.scroll_to_top:
     st.components.v1.html(
         """
@@ -268,24 +203,34 @@ if st.session_state.scroll_to_top:
     )
     st.session_state.scroll_to_top = False
 
-# ================= 数据库下载接口（无密码）（原始代码，未改动） =================
+# ================= 数据库下载接口（自动下载，修复备份） =================
 query_params = st.query_params
 if "download_db" in query_params:
     try:
         with open("makuake.db", "rb") as f:
             db_data = f.read()
+        
         st.download_button(
-            label="点击下载数据库（如果未自动下载）",
+            label="下载数据库",
             data=db_data,
             file_name="makuake.db",
-            mime="application/octet-stream"
+            mime="application/octet-stream",
+            key="auto_download_db"
         )
+        
+        st.markdown("""
+        <script>
+            setTimeout(() => {
+                document.querySelector('[data-testid="auto_download_db"]').click();
+            }, 500);
+        </script>
+        """, unsafe_allow_html=True)
         st.stop()
     except FileNotFoundError:
         st.error("数据库文件不存在")
         st.stop()
 
-# ================= 侧边栏（原始代码，未改动） =================
+# ================= 侧边栏 =================
 with st.sidebar:
     # ---------- 管理员验证 ----------
     if not st.session_state.is_admin:
@@ -395,7 +340,7 @@ with st.sidebar:
         st.info("暂无监控项目")
         selected_project = None
 
-# ================= 项目总览（所有项目对比）（原始代码，未改动） =================
+# ================= 项目总览（所有项目对比） =================
 if not projects_df.empty:
     with st.expander("📋 项目总览（点击展开对比）", expanded=False):
         overview_data = []
@@ -472,7 +417,7 @@ if not projects_df.empty:
             hide_index=True
         )
 
-# ================= 主界面（原始代码，未改动） =================
+# ================= 主界面 =================
 if selected_project is not None:
     st.title(f"📊 {selected_project['title']}")
     st.caption(f"🔗 [访问原始项目]({selected_project['url']})")
@@ -689,9 +634,9 @@ else:
     st.warning("请在左侧侧边栏添加您的第一个监控项目。")
 
 st.divider()
-st.caption("Yuuto - Makuake Radar 1.0 | 时区 Asia/Shanghai | 采集引擎：Selenium + ChromeDriver | 自动备份已集成")
+st.caption("Yuuto - Makuake Radar 1.0 | 时区 Asia/Shanghai | 采集引擎：Selenium + ChromeDriver")
 
-# ================= 定时采集逻辑（原始代码，未改动） =================
+# ================= 定时采集逻辑 =================
 if st.session_state.auto_running and st.session_state.countdown > 0:
     time.sleep(1)
     st.session_state.countdown -= 1
@@ -707,7 +652,7 @@ if st.session_state.auto_running and st.session_state.countdown > 0:
     else:
         st.rerun()
 
-# ================= 切换项目时触发滚动（原始代码，未改动） =================
+# ================= 切换项目时触发滚动 =================
 if selected_project is not None:
     current_id = selected_project['id']
     if st.session_state.get("selected_project_id") != current_id:
