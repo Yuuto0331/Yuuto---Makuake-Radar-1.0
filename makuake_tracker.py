@@ -42,7 +42,6 @@ def get_makuake_data(project_url):
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         driver.get(project_url)
-        # 修复：正确方法名 presence_of_element_located
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
@@ -128,10 +127,19 @@ def init_db():
 conn = init_db()
 
 def save_history(project_id, amount, supporters):
-    c = conn.cursor()
-    c.execute("INSERT INTO history (project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?)",
-              (project_id, amount, supporters, datetime.now(ZoneInfo("Asia/Shanghai"))))
-    conn.commit()
+    try:
+        # 每次都重新连接，确保一定能写入
+        conn_write = sqlite3.connect('makuake.db')
+        c = conn_write.cursor()
+        now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime('%Y-%m-%d %H:%M:%S')
+        c.execute(
+            "INSERT INTO history (project_id, amount, supporters, collected_at) VALUES (?, ?, ?, ?)",
+            (project_id, amount, supporters, now)
+        )
+        conn_write.commit()
+        conn_write.close()
+    except Exception as e:
+        print("保存历史失败:", e)
 
 def load_settings():
     c = conn.cursor()
@@ -203,33 +211,6 @@ if st.session_state.scroll_to_top:
         height=0,
     )
     st.session_state.scroll_to_top = False
-
-# ================= 数据库下载接口（自动下载，修复备份） =================
-query_params = st.query_params
-if "download_db" in query_params:
-    try:
-        with open("makuake.db", "rb") as f:
-            db_data = f.read()
-        
-        st.download_button(
-            label="下载数据库",
-            data=db_data,
-            file_name="makuake.db",
-            mime="application/octet-stream",
-            key="auto_download_db"
-        )
-        
-        st.markdown("""
-        <script>
-            setTimeout(() => {
-                document.querySelector('[data-testid="auto_download_db"]').click();
-            }, 500);
-        </script>
-        """, unsafe_allow_html=True)
-        st.stop()
-    except FileNotFoundError:
-        st.error("数据库文件不存在")
-        st.stop()
 
 # ================= 侧边栏 =================
 with st.sidebar:
